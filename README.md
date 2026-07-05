@@ -30,7 +30,7 @@ Clone this repo into your skill directory:
 
 ```bash
 cd ~/.codex/skills
-git clone https://github.com/yinbaozong/youtube-note-forge.git
+git clone https://github.com/yinbaozong/Youtube-note-forge.git
 ```
 
 For OpenCode-style skill locations, clone it to:
@@ -38,7 +38,7 @@ For OpenCode-style skill locations, clone it to:
 ```bash
 mkdir -p ~/.config/opencode/skills
 cd ~/.config/opencode/skills
-git clone https://github.com/yinbaozong/youtube-note-forge.git
+git clone https://github.com/yinbaozong/Youtube-note-forge.git
 ```
 
 Install runtime dependencies:
