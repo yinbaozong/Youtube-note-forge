@@ -64,6 +64,10 @@ python scripts/extract_transcript.py --self-test --vault ./_verify --output-dir 
 
 If this succeeds, your Python dependencies and Markdown/SRT generation path are working. Real video extraction can still require platform access or valid cookies.
 
+## Need Help?
+
+If you want to reproduce this project but are not sure how to start, feel free to contact me anytime: yinbaozong@163.com
+
 ## First Run
 
 Run from your Obsidian vault root:
