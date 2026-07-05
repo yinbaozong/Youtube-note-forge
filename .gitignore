@@ -1,0 +1,16 @@
+.cache/
+_verify*/
+__pycache__/
+*.py[cod]
+
+node_modules/
+
+cookies.txt
+cookies.youtube.txt
+cookies.bilibili.txt
+youtube-auth.cookies.txt
+*.lastgood
+chrome-auth-profile/
+
+.DS_Store
+Thumbs.db
