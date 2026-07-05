@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360" role="img" aria-labelledby="title desc">
+  <title id="title">Output structure</title>
+  <desc id="desc">Generated Markdown, SRT transcript, and local visual assets.</desc>
+  <rect width="980" height="360" rx="22" fill="#f8fafc"/>
+  <text x="48" y="58" fill="#0f172a" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="700">Output that survives the web</text>
+  <text x="48" y="92" fill="#475569" font-family="Segoe UI, Arial, sans-serif" font-size="15">Local Markdown, subtitles, and images are kept together for long-term review.</text>
+  <rect x="54" y="126" width="392" height="188" rx="18" fill="#0f172a"/>
+  <text x="86" y="166" fill="#e2e8f0" font-family="Consolas, monospace" font-size="16">YouTube video/</text>
+  <text x="110" y="198" fill="#bfdbfe" font-family="Consolas, monospace" font-size="15">中文标题 - English Title.md</text>
+  <text x="110" y="230" fill="#bbf7d0" font-family="Consolas, monospace" font-size="15">transcripts/video.srt</text>
+  <text x="110" y="262" fill="#fed7aa" font-family="Consolas, monospace" font-size="15">assets/video/cover.jpg</text>
+  <text x="110" y="294" fill="#fed7aa" font-family="Consolas, monospace" font-size="15">assets/video/frame_00-03-21.jpg</text>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="512" y="132" width="162" height="84" rx="16" fill="#dbeafe"/>
+    <text x="550" y="169" fill="#1e3a8a" font-size="18" font-weight="700">Markdown</text>
+    <text x="542" y="194" fill="#1d4ed8" font-size="12">Review and rewrite</text>
+    <rect x="734" y="132" width="162" height="84" rx="16" fill="#dcfce7"/>
+    <text x="789" y="169" fill="#14532d" font-size="18" font-weight="700">SRT</text>
+    <text x="778" y="194" fill="#15803d" font-size="12">Exact transcript file</text>
+    <rect x="512" y="242" width="162" height="84" rx="16" fill="#ffedd5"/>
+    <text x="562" y="279" fill="#7c2d12" font-size="18" font-weight="700">Images</text>
+    <text x="543" y="304" fill="#c2410c" font-size="12">Cover and keyframes</text>
+    <rect x="734" y="242" width="162" height="84" rx="16" fill="#ede9fe"/>
+    <text x="777" y="279" fill="#4c1d95" font-size="18" font-weight="700">Agent</text>
+    <text x="768" y="304" fill="#6d28d9" font-size="12">Chinese learning note</text>
+  </g>
+</svg>

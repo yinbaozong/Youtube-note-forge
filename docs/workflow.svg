@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360" role="img" aria-labelledby="title desc">
+  <title id="title">YouTube Note Forge workflow</title>
+  <desc id="desc">Video URL to yt-dlp extraction, subtitles, screenshots, Markdown, and Obsidian note.</desc>
+  <rect width="980" height="360" rx="22" fill="#0f172a"/>
+  <text x="48" y="58" fill="#f8fafc" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="700">YouTube Note Forge</text>
+  <text x="48" y="92" fill="#cbd5e1" font-family="Segoe UI, Arial, sans-serif" font-size="15">Turn a video URL into a review-ready Obsidian learning note.</text>
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="650">
+    <rect x="48" y="136" width="150" height="86" rx="16" fill="#1d4ed8"/>
+    <text x="78" y="172" fill="#fff">Video URL</text>
+    <text x="78" y="196" fill="#dbeafe" font-size="12">YouTube / Bilibili</text>
+    <rect x="248" y="136" width="150" height="86" rx="16" fill="#0f766e"/>
+    <text x="285" y="172" fill="#fff">yt-dlp</text>
+    <text x="277" y="196" fill="#ccfbf1" font-size="12">Metadata first</text>
+    <rect x="448" y="136" width="150" height="86" rx="16" fill="#7c3aed"/>
+    <text x="481" y="172" fill="#fff">Subtitles</text>
+    <text x="475" y="196" fill="#ede9fe" font-size="12">SRT + transcript</text>
+    <rect x="648" y="136" width="150" height="86" rx="16" fill="#c2410c"/>
+    <text x="688" y="172" fill="#fff">Frames</text>
+    <text x="681" y="196" fill="#ffedd5" font-size="12">Cover + key shots</text>
+    <rect x="798" y="258" width="134" height="54" rx="14" fill="#16a34a"/>
+    <text x="824" y="291" fill="#fff">Obsidian</text>
+  </g>
+  <g stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M204 179h38"/>
+    <path d="M236 169l12 10-12 10"/>
+    <path d="M404 179h38"/>
+    <path d="M436 169l12 10-12 10"/>
+    <path d="M604 179h38"/>
+    <path d="M636 169l12 10-12 10"/>
+    <path d="M724 224c0 42 42 61 68 61"/>
+    <path d="M783 275l15 10-15 10"/>
+  </g>
+  <rect x="48" y="258" width="690" height="54" rx="14" fill="#111827" stroke="#334155"/>
+  <text x="72" y="291" fill="#e5e7eb" font-family="Consolas, monospace" font-size="14">python scripts/extract_transcript.py &lt;video_url&gt; --output-dir "YouTube video"</text>
+</svg>

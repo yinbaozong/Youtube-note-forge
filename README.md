@@ -4,6 +4,8 @@ Turn long videos into Obsidian-ready learning notes, with transcripts, SRT files
 
 YouTube Note Forge is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then ask your coding agent to forge it into a structured Chinese note that is actually useful for review, writing, and reuse.
 
+![YouTube Note Forge workflow](docs/workflow.svg)
+
 ## Why Star This
 
 - Built for video learners, not just transcript dumping.
@@ -19,6 +21,8 @@ YouTube Note Forge is an agent skill for people who do serious learning from vid
 3. Optionally falls back to local ASR with `faster-whisper`.
 4. Extracts cover images and useful keyframes without downloading the whole video just for screenshots.
 5. Creates a Markdown source note that guides an agent to write a polished Chinese learning note.
+
+![Generated output structure](docs/output-structure.svg)
 
 ## Install
 
