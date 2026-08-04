@@ -16,10 +16,8 @@ from pathlib import Path
 from extract_transcript import (
     YtDlp,
     image_quality_score,
-    image_signature,
     platform_cookie_path,
     sanitize_filename,
-    signature_distance,
     video_platform,
 )
 from video_common import Deadline, PipelineError, VERSION, emit_result, version_text
@@ -28,6 +26,7 @@ from video_common import Deadline, PipelineError, VERSION, emit_result, version_
 MAX_FRAMES = 24
 FRAME_DEADLINE_SECONDS = 120
 FRAME_TIMEOUT_SECONDS = 15
+MIN_FRAME_BYTES = 2_000
 
 
 @dataclass(frozen=True)
@@ -170,7 +169,7 @@ def extract_candidate(ffmpeg: str, source: str, seconds: float, target: Path, ti
         result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return False
-    return result.returncode == 0 and target.exists() and target.stat().st_size > 10_000 and image_quality_score(target) >= 0
+    return result.returncode == 0 and target.exists() and target.stat().st_size > MIN_FRAME_BYTES and image_quality_score(target) >= 0
 
 
 def extract_frame(ffmpeg: str, source: str, request: FrameRequest, target: Path, deadline: Deadline) -> tuple[bool, str]:
@@ -225,7 +224,6 @@ def main(argv: list[str] | None = None) -> int:
     assets_dir.mkdir(parents=True, exist_ok=True)
     successful: list[dict] = []
     failures: list[dict] = []
-    signatures: list[tuple[int, ...]] = []
     refreshed = False
     for index, request in enumerate(plan, start=1):
         try:
@@ -251,13 +249,6 @@ def main(argv: list[str] | None = None) -> int:
                 failures.append({"section_id": request.section_id, "timestamp": request.timestamp, "code": "FRAME_TIMEOUT", "required": request.required})
                 break
         if ok:
-            signature = image_signature(target)
-            if signature and any(signature_distance(signature, old) < 0.75 for old in signatures):
-                target.unlink(missing_ok=True)
-                failures.append({"section_id": request.section_id, "timestamp": request.timestamp, "code": "DUPLICATE_FRAME", "required": request.required})
-                continue
-            if signature:
-                signatures.append(signature)
             successful.append({"section_id": request.section_id, "timestamp": request.timestamp, "purpose": request.purpose, "required": request.required, "path": str(target)})
         else:
             failures.append({"section_id": request.section_id, "timestamp": request.timestamp, "code": reason, "required": request.required})

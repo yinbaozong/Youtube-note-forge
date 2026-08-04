@@ -759,7 +759,9 @@ def image_quality_score(path: Path) -> float:
             contrast = float(stat.stddev[0])
             pixels = np.asarray(gray.resize((320, 180)), dtype=np.float32)
             sharpness = float(np.var(np.diff(pixels, axis=0)) + np.var(np.diff(pixels, axis=1)))
-        if brightness < 18 or brightness > 245 or contrast < 8:
+        # Keep terminal, slide, and code frames even when their layouts are
+        # visually similar. Reject only effectively blank black/white frames.
+        if (brightness < 5 or brightness > 250) and contrast < 3:
             return -1
         exposure = max(0.0, 1.0 - abs(brightness - 128) / 128)
         return contrast * 1.5 + min(sharpness, 5000) / 50 + exposure * 20
@@ -827,22 +829,6 @@ def extract_remote_representative_frame(ffmpeg: str, source_url: str, seconds: f
     return target.exists() and target.stat().st_size > 10_000
 
 
-def image_signature(path: Path) -> tuple[int, ...] | None:
-    try:
-        import numpy as np  # type: ignore
-        from PIL import Image  # type: ignore
-
-        with Image.open(path) as image:
-            gray = image.convert("L").resize((16, 16))
-            return tuple(int(value) // 16 for value in np.asarray(gray).reshape(-1))
-    except Exception:
-        return None
-
-
-def signature_distance(left: tuple[int, ...], right: tuple[int, ...]) -> float:
-    return sum(abs(a - b) for a, b in zip(left, right)) / len(left)
-
-
 def extract_partial_frames(
     runner: YtDlp,
     url: str,
@@ -853,7 +839,6 @@ def extract_partial_frames(
     transcript_entries: list[TranscriptEntry],
 ) -> tuple[list[Path], int, int, int]:
     frames: list[Path] = []
-    signatures: list[tuple[int, ...]] = []
     cache_hits = 0
     downloaded_bytes = 0
     direct_frames = 0
@@ -865,9 +850,6 @@ def extract_partial_frames(
         target = assets_dir / f"frame_{idx:03d}_{seconds_to_timestamp(seconds).replace(':', '-')}.jpg"
         if target.exists() and target.stat().st_size > 10_000:
             frames.append(target)
-            signature = image_signature(target)
-            if signature:
-                signatures.append(signature)
             cache_hits += 1
             print(f"  [{idx}/{len(times)}] Reused screenshot {seconds_to_timestamp(seconds)}")
             continue
@@ -876,14 +858,7 @@ def extract_partial_frames(
             print(f"  [{idx}/{len(times)}] Seeking remote 720p source near {seconds_to_timestamp(seconds)}...")
             if extract_remote_representative_frame(ffmpeg, remote_source, seconds, target):
                 direct_frames += 1
-                signature = image_signature(target)
-                if signature and any(signature_distance(signature, old) < 0.75 for old in signatures):
-                    target.unlink(missing_ok=True)
-                    print(f"  [{idx}/{len(times)}] Skipped near-duplicate screenshot.")
-                    continue
                 frames.append(target)
-                if signature:
-                    signatures.append(signature)
                 continue
             target.unlink(missing_ok=True)
             print(f"  [{idx}/{len(times)}] Direct seek failed; trying a short downloaded segment.")
@@ -900,14 +875,7 @@ def extract_partial_frames(
         if not extract_representative_frame(ffmpeg, segment, target):
             target.unlink(missing_ok=True)
             continue
-        signature = image_signature(target)
-        if signature and any(signature_distance(signature, old) < 0.75 for old in signatures):
-            target.unlink(missing_ok=True)
-            print(f"  [{idx}/{len(times)}] Skipped near-duplicate screenshot.")
-            continue
         frames.append(target)
-        if signature:
-            signatures.append(signature)
     return frames, cache_hits, downloaded_bytes, direct_frames
 
 
@@ -1294,11 +1262,11 @@ def create_markdown(
         f"transcript_source: {yaml_scalar(transcript_source)}",
         f"transcript_language: {yaml_scalar(transcript_language)}",
         f"transcript_file: {yaml_scalar(vault_link(transcript_path, vault_root) if transcript_path else '')}",
+        f"cover: {yaml_scalar(vault_link(cover_path, vault_root) if cover_path else '')}",
         f"view_count: {yaml_scalar(metadata.get('view_count'))}",
         f"like_count: {yaml_scalar(metadata.get('like_count'))}",
         "tags:",
         "  - video-learning",
-        "  - source/video",
         "---",
         "",
         "## Source Status",
@@ -1453,59 +1421,22 @@ def create_markdown(
         f"like_count: {yaml_scalar(metadata.get('like_count'))}",
         "tags:",
         "  - video-learning",
-        "  - source/video",
         "---",
-        "",
-        "## 来源状态",
-        "",
-        f"- 视频链接：{webpage_url}",
-        f"- 频道/作者：{channel}",
-        f"- 时长：{duration}",
-        f"- 字幕来源：{transcript_source}",
-        f"- 字幕语言：{transcript_language}",
-        f"- SRT 字幕：[[{vault_link(transcript_path, vault_root)}]]" if transcript_path else "- SRT 字幕：待确认",
     ]
     if warnings:
-        lines.append("- 提取警告：")
+        lines.extend(["", "## 提取警告", ""])
         for warning in warnings:
-            lines.append(f"  - {warning}")
+            lines.append(f"- {warning}")
 
     description = (metadata.get("description") or "").strip()
     if description:
         lines.extend(["", "## 视频描述", "", description[:2000]])
 
-    frames = frame_evidence(frame_paths, transcript_entries)
-    if cover_path or frames:
-        lines.extend(["", "## 可用视觉素材", ""])
-        if cover_path:
-            lines.extend(["### 封面", "", f"![[{vault_link(cover_path, vault_root)}|cover]]", ""])
-        if frames:
-            lines.extend(
-                [
-                    "## 关键画面索引",
-                    "",
-                    "> 这些截图不是随机抽取。整理最终笔记时，必须把能说明概念、步骤、案例、对比或结果的截图插入到“详细内容总结”的对应段落中，并删除或弱化本索引。不要把所有图片只堆在这里。",
-                    "",
-                ]
-            )
-            for evidence in frames:
-                lines.extend(
-                    [
-                        f"### {evidence['timestamp']}",
-                        "",
-                        f"![[{vault_link(evidence['path'], vault_root)}|520]]",
-                        "",
-                        f"- 附近字幕：{evidence['snippet']}",
-                        "- 插图用途：判断这一帧能说明哪个观点、步骤、案例、结果或对比；若有用，请移动或复制到对应的“详细内容总结”小节下，并写一句图片说明。",
-                        "",
-                    ]
-                )
-
     lines.extend(
         [
             "## 学习笔记整理任务",
             "",
-            "> 先依据 SRT 为重要正文小节制定画面计划，再运行 `extract_frames.py`。画面计划成功后，基于本文件中的视频信息、视频描述、关键画面和单独保存的 SRT 字幕整理中文学习笔记。不要只做摘要；信息不足时标注“待确认”。",
+            "> 先依据 SRT 为重要正文小节制定画面计划，再运行 `extract_frames.py`。抽帧成功后，基于视频信息、描述、SRT 和关键画面整理中文学习笔记。文章内容由字幕决定，图片只作辅助证据，不能为了配图而删减知识点；信息不足时标注“待确认”。",
             "",
             "### 必须遵守",
             "",
@@ -1513,10 +1444,10 @@ def create_markdown(
             "2. 正文不要写顶层 `# 标题`，正文直接从 `## 一句话摘要` 开始。",
             "3. 正文使用中文表达。除必要专业术语、产品名、代码命令、模型名、论文名、链接和 YAML 外，不要夹杂英文句子或英文小标题。",
             "4. 关键 English terms 可以保留英文原词，但第一次出现时必须用中文解释它在本视频语境中的含义。",
-            "5. 先完成画面计划和定点抽帧。`## 详细内容总结` 必须插入每个必需章节的对应截图；每张图下面写一句中文说明：这张图证明/展示/对比了什么。",
+            "5. 先完成画面计划和定点抽帧。保留计划中所有非纯黑、非纯白的有效画面，不做近重复去重，也不使用 OCR 或 AI 图像识别。`## 详细内容总结` 插入对应截图并写中文说明。",
             "6. 抽帧失败时立即停止并报告，不要改用浏览器、下载完整视频或临时凑图。",
             "7. 原始字幕不要粘贴到正文，文末只保留 SRT 字幕链接。",
-            "8. 最终回答用户前，必须回看当前文档并完成文末的“输出自检清单”。如有一项不满足，先继续修改当前文档，不要提前结束。",
+            "8. 最终回答用户前运行 `validate_note.py`。终稿必须删除视频描述、提取警告、整理任务和输出自检清单等脚手架章节。",
             "",
             "## 一句话摘要",
             "",
@@ -1528,7 +1459,7 @@ def create_markdown(
             "",
             "## 详细内容总结",
             "",
-            "按视频逻辑分段讲解。不要流水账，要把观点、方法、案例、因果关系和关键证据整理清楚。能用截图说明的段落，必须插入来自“关键画面索引”的对应截图，并说明它证明了什么。",
+            "按视频逻辑完整分段讲解。不要流水账，也不要为了缩短文章或适配图片而遗漏重要知识。区分事实、视频观点、推断、案例、限制条件与不确定性；把方法、因果关系和关键证据讲清楚。截图放在对应描述附近并说明它展示了什么。",
             "",
             "## 重点难点解析",
             "",
@@ -1560,7 +1491,7 @@ def create_markdown(
             "",
             "- [ ] 文件名是 `中文标题 - English Title`，不是纯英文，也不是 `待命名 - ...`。",
             "- [ ] 正文从 `## 一句话摘要` 开始，没有重复大标题。",
-            "- [ ] `## 详细内容总结` 已经插入可用截图；如果没有截图，已经明确标注原因。",
+            "- [ ] `## 详细内容总结` 已插入抽帧清单中的真实截图。",
             "- [ ] 每张正文截图下面都有中文说明。",
             "- [ ] 正文没有不必要的英文句子或英文小标题；必要英文术语均有中文解释。",
             "- [ ] 文末只链接 SRT 字幕，没有粘贴完整原始字幕。",

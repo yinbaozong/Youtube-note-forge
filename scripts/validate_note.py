@@ -24,6 +24,16 @@ SECTIONS = [
     "原始字幕 Transcript",
 ]
 
+FORBIDDEN_FINAL_SECTIONS = [
+    "来源状态",
+    "视频描述",
+    "可用视觉素材",
+    "关键画面索引",
+    "提取警告",
+    "学习笔记整理任务",
+    "输出自检清单",
+]
+
 
 def split_frontmatter(text: str) -> tuple[str, str]:
     if text.startswith("---\n"):
@@ -108,6 +118,9 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
             positions.append(found.start())
     if positions and positions != sorted(positions):
         errors.append({"code": "SECTION_ORDER", "message": "章节顺序不符合学习笔记契约。"})
+    for name in FORBIDDEN_FINAL_SECTIONS:
+        if re.search(rf"^## {re.escape(name)}\s*$", body, flags=re.MULTILINE):
+            errors.append({"code": "SCAFFOLD_SECTION_PRESENT", "message": f"终稿必须删除脚手架章节：{name}。"})
     details = section_body(body, "详细内容总结")
     images = list(re.finditer(r"!\[\[([^\]]+)\]\]", details))
     manifest, _, manifest_errors = load_frame_manifest(frontmatter, note, vault)

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from extract_frames import attach_manifest_to_note, extract_candidate, load_plan, resolve_ffmpeg  # noqa: E402
+from extract_transcript import image_quality_score  # noqa: E402
 from validate_note import validate  # noqa: E402
 from video_common import VERSION, version_text  # noqa: E402
 from video_note import version_report  # noqa: E402
@@ -20,12 +21,12 @@ from video_note import version_report  # noqa: E402
 
 class V3ContractTests(unittest.TestCase):
     def test_version_is_single_source(self) -> None:
-        self.assertEqual(VERSION, "3.0.1")
-        self.assertEqual(version_text(), "youtube-transcript 3.0.1")
+        self.assertEqual(VERSION, "3.0.2")
+        self.assertEqual(version_text(), "youtube-transcript 3.0.2")
 
     def test_version_report_contains_core_hashes(self) -> None:
         report = version_report()
-        self.assertEqual(report["skill_version"], "3.0.1")
+        self.assertEqual(report["skill_version"], "3.0.2")
         self.assertIn("scripts/extract_frames.py", report["core_sha256"])
 
     def test_frame_plan_accepts_utf8_bom(self) -> None:
@@ -156,6 +157,35 @@ frame_manifest: "YouTube video/assets/frame-manifest.json"
             attach_manifest_to_note(note, manifest, vault)
             text = note.read_text(encoding="utf-8")
         self.assertIn('frame_manifest: "assets/frame-manifest.json"', text)
+
+    def test_only_blank_black_or_white_frames_are_rejected(self) -> None:
+        from PIL import Image, ImageDraw
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            black = root / "black.jpg"
+            white = root / "white.jpg"
+            terminal_a = root / "terminal-a.jpg"
+            terminal_b = root / "terminal-b.jpg"
+            Image.new("RGB", (1280, 720), "black").save(black, quality=95)
+            Image.new("RGB", (1280, 720), "white").save(white, quality=95)
+            for path, text in ((terminal_a, "$ git status"), (terminal_b, "$ git commit")):
+                image = Image.new("RGB", (1280, 720), "#101010")
+                ImageDraw.Draw(image).text((80, 80), text, fill="white")
+                image.save(path, quality=95)
+            self.assertLess(image_quality_score(black), 0)
+            self.assertLess(image_quality_score(white), 0)
+            self.assertGreaterEqual(image_quality_score(terminal_a), 0)
+            self.assertGreaterEqual(image_quality_score(terminal_b), 0)
+        self.assertNotIn("DUPLICATE_FRAME", (ROOT / "scripts" / "extract_frames.py").read_text(encoding="utf-8"))
+
+    def test_final_note_rejects_source_scaffolding(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            vault = Path(raw)
+            note = vault / "中文标题 - English Title.md"
+            note.write_text(f"---\nskill_version: {VERSION}\n---\n\n## 来源状态\n\n重复来源。", encoding="utf-8")
+            codes = {item["code"] for item in validate(note, vault)}
+        self.assertIn("SCAFFOLD_SECTION_PRESENT", codes)
 
     def test_direct_frame_extraction_uses_a_local_stream_without_download(self) -> None:
         ffmpeg = resolve_ffmpeg()
