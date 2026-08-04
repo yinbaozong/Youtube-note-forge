@@ -54,6 +54,39 @@ def resolve_obsidian_target(raw: str, note: Path, vault: Path) -> Path | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def frontmatter_value(frontmatter: str, key: str) -> str | None:
+    match = re.search(rf"^{re.escape(key)}:\s*(.*?)\s*$", frontmatter, flags=re.MULTILINE)
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    if not raw:
+        return None
+    if raw[:1] in {'"', "'"}:
+        try:
+            return str(json.loads(raw)) if raw.startswith('"') else raw[1:-1]
+        except (json.JSONDecodeError, IndexError):
+            return raw.strip("\"'")
+    return raw
+
+
+def load_frame_manifest(frontmatter: str, note: Path, vault: Path) -> tuple[dict, Path | None, list[dict[str, str]]]:
+    errors: list[dict[str, str]] = []
+    raw = frontmatter_value(frontmatter, "frame_manifest")
+    if not raw:
+        return {}, None, [{"code": "FRAME_MANIFEST_MISSING", "message": "笔记 YAML 缺少 frame_manifest；必须先成功运行 extract_frames.py。"}]
+    path = resolve_obsidian_target(raw, note, vault)
+    if not path:
+        return {}, None, [{"code": "FRAME_MANIFEST_BROKEN", "message": f"抽帧清单不存在：{raw}"}]
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, path, [{"code": "FRAME_MANIFEST_INVALID", "message": f"抽帧清单无法读取：{exc}"}]
+    frames = payload.get("frames")
+    if payload.get("status") != "ok" or payload.get("skill_version") != VERSION or not isinstance(frames, list) or not frames:
+        errors.append({"code": "FRAME_MANIFEST_INVALID", "message": "抽帧清单必须是当前版本成功生成且至少包含一张真实关键帧。"})
+    return payload, path, errors
+
+
 def validate(note: Path, vault: Path) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     if not note.exists():
@@ -62,7 +95,7 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
         errors.append({"code": "FILENAME_INVALID", "message": "文件名必须是中文标题 - English Title。"})
     text = note.read_text(encoding="utf-8")
     frontmatter, body = split_frontmatter(text)
-    if f"skill_version: {VERSION}" not in frontmatter:
+    if frontmatter_value(frontmatter, "skill_version") != VERSION:
         errors.append({"code": "VERSION_MISSING", "message": f"YAML 必须包含 skill_version: {VERSION}。"})
     if re.search(r"^#\s+", body, flags=re.MULTILINE):
         errors.append({"code": "DUPLICATE_TITLE", "message": "正文不能包含顶层 # 标题。"})
@@ -77,15 +110,38 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
         errors.append({"code": "SECTION_ORDER", "message": "章节顺序不符合学习笔记契约。"})
     details = section_body(body, "详细内容总结")
     images = list(re.finditer(r"!\[\[([^\]]+)\]\]", details))
+    manifest, _, manifest_errors = load_frame_manifest(frontmatter, note, vault)
+    errors.extend(manifest_errors)
+    manifest_frames: dict[Path, dict] = {}
+    for frame in manifest.get("frames", []) if isinstance(manifest.get("frames"), list) else []:
+        if not isinstance(frame, dict) or not frame.get("path"):
+            continue
+        target = resolve_obsidian_target(str(frame["path"]), note, vault)
+        if target:
+            manifest_frames[target.resolve()] = frame
     if not images:
         errors.append({"code": "DETAIL_IMAGES_MISSING", "message": "详细内容总结必须包含对应截图。"})
+    embedded: list[Path] = []
     for image in images:
         target = resolve_obsidian_target(image.group(1), note, vault)
         if not target:
             errors.append({"code": "IMAGE_LINK_BROKEN", "message": f"截图链接无效：{image.group(1)}"})
+        else:
+            resolved = target.resolve()
+            embedded.append(resolved)
+            if target.name.lower().startswith("cover"):
+                errors.append({"code": "COVER_USED_AS_FRAME", "message": f"封面不能替代正文关键帧：{image.group(1)}"})
+            elif resolved not in manifest_frames:
+                errors.append({"code": "IMAGE_NOT_IN_MANIFEST", "message": f"正文图片不在成功抽帧清单中：{image.group(1)}"})
         nearby = details[image.end() : image.end() + 240]
         if len(re.findall(r"[\u3400-\u9fff]", nearby)) < 8:
             errors.append({"code": "IMAGE_CAPTION_MISSING", "message": f"截图缺少中文说明：{image.group(1)}"})
+    if len(embedded) != len(set(embedded)):
+        errors.append({"code": "DUPLICATE_IMAGE_EMBED", "message": "详细内容总结重复嵌入了同一张图片。"})
+    embedded_set = set(embedded)
+    for path, frame in manifest_frames.items():
+        if frame.get("required") and path not in embedded_set:
+            errors.append({"code": "REQUIRED_FRAME_NOT_EMBEDDED", "message": f"必需关键帧未插入详细内容总结：{path.name}"})
     transcript = section_body(body, "原始字幕 Transcript")
     srt_links = re.findall(r"\[\[([^\]]+\.srt[^\]]*)\]\]", transcript, flags=re.IGNORECASE)
     if not srt_links:

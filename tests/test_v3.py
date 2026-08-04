@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from extract_frames import extract_candidate, load_plan, resolve_ffmpeg  # noqa: E402
+from extract_frames import attach_manifest_to_note, extract_candidate, load_plan, resolve_ffmpeg  # noqa: E402
 from validate_note import validate  # noqa: E402
 from video_common import VERSION, version_text  # noqa: E402
 from video_note import version_report  # noqa: E402
@@ -20,12 +20,12 @@ from video_note import version_report  # noqa: E402
 
 class V3ContractTests(unittest.TestCase):
     def test_version_is_single_source(self) -> None:
-        self.assertEqual(VERSION, "3.0.0")
-        self.assertEqual(version_text(), "youtube-transcript 3.0.0")
+        self.assertEqual(VERSION, "3.0.1")
+        self.assertEqual(version_text(), "youtube-transcript 3.0.1")
 
     def test_version_report_contains_core_hashes(self) -> None:
         report = version_report()
-        self.assertEqual(report["skill_version"], "3.0.0")
+        self.assertEqual(report["skill_version"], "3.0.1")
         self.assertIn("scripts/extract_frames.py", report["core_sha256"])
 
     def test_frame_plan_accepts_utf8_bom(self) -> None:
@@ -45,10 +45,30 @@ class V3ContractTests(unittest.TestCase):
             assets.mkdir(parents=True)
             transcripts.mkdir(parents=True)
             (assets / "frame.jpg").write_bytes(b"image")
+            (assets / "frame-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ok",
+                        "skill_version": VERSION,
+                        "frames": [
+                            {
+                                "section_id": "步骤一",
+                                "timestamp": 3.0,
+                                "purpose": "展示关键界面",
+                                "required": True,
+                                "path": str(assets / "frame.jpg"),
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             (transcripts / "test.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\n测试\n", encoding="utf-8")
             note = note_dir / "中文测试标题 - English Test Title.md"
             content = f"""---
 skill_version: {VERSION}
+frame_manifest: "YouTube video/assets/frame-manifest.json"
 ---
 
 ## 一句话摘要
@@ -104,6 +124,38 @@ skill_version: {VERSION}
             codes = {item["code"] for item in validate(note, vault)}
         self.assertIn("DETAIL_IMAGES_MISSING", codes)
         self.assertIn("SECTION_MISSING", codes)
+        self.assertIn("FRAME_MANIFEST_MISSING", codes)
+
+    def test_cover_cannot_replace_a_manifest_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            vault = Path(raw)
+            note = vault / "中文标题 - English Title.md"
+            cover = vault / "cover.jpg"
+            manifest = vault / "frame-manifest.json"
+            cover.write_bytes(b"cover")
+            manifest.write_text(
+                json.dumps({"status": "ok", "skill_version": VERSION, "frames": [{"path": str(cover), "required": True}]}),
+                encoding="utf-8",
+            )
+            note.write_text(
+                f"---\nskill_version: \"{VERSION}\"\nframe_manifest: \"frame-manifest.json\"\n---\n\n"
+                "## 详细内容总结\n\n![[cover.jpg]]\n\n这张图片只是视频封面，不能证明正文中的具体操作步骤。\n",
+                encoding="utf-8",
+            )
+            codes = {item["code"] for item in validate(note, vault)}
+        self.assertIn("COVER_USED_AS_FRAME", codes)
+
+    def test_frame_extraction_attaches_manifest_to_note_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            vault = Path(raw)
+            note = vault / "note.md"
+            manifest = vault / "assets" / "frame-manifest.json"
+            manifest.parent.mkdir()
+            manifest.write_text("{}", encoding="utf-8")
+            note.write_text(f"---\nskill_version: {VERSION}\n---\n\nsource", encoding="utf-8")
+            attach_manifest_to_note(note, manifest, vault)
+            text = note.read_text(encoding="utf-8")
+        self.assertIn('frame_manifest: "assets/frame-manifest.json"', text)
 
     def test_direct_frame_extraction_uses_a_local_stream_without_download(self) -> None:
         ffmpeg = resolve_ffmpeg()

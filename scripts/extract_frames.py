@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,7 @@ from extract_transcript import (
     signature_distance,
     video_platform,
 )
-from video_common import Deadline, PipelineError, emit_result, version_text
+from video_common import Deadline, PipelineError, VERSION, emit_result, version_text
 
 
 MAX_FRAMES = 24
@@ -120,6 +121,33 @@ def resolve_ffmpeg() -> str:
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception as exc:
         raise PipelineError("FFMPEG_UNAVAILABLE", "frame_source", "未找到 ffmpeg 或 imageio-ffmpeg。") from exc
+
+
+def vault_relative(path: Path, vault: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(vault.resolve())).replace("\\", "/")
+    except ValueError:
+        return str(path.resolve()).replace("\\", "/")
+
+
+def attach_manifest_to_note(note: Path, manifest: Path, vault: Path) -> None:
+    try:
+        text = note.read_text(encoding="utf-8")
+        if not text.startswith("---\n"):
+            raise ValueError("note has no YAML frontmatter")
+        end = text.find("\n---", 4)
+        if end < 0:
+            raise ValueError("note YAML frontmatter is not closed")
+        frontmatter = text[4:end]
+        value = vault_relative(manifest, vault)
+        line = f"frame_manifest: {json.dumps(value, ensure_ascii=False)}"
+        if re.search(r"^frame_manifest:\s*.*$", frontmatter, flags=re.MULTILINE):
+            frontmatter = re.sub(r"^frame_manifest:\s*.*$", line, frontmatter, flags=re.MULTILINE)
+        else:
+            frontmatter = frontmatter.rstrip() + "\n" + line
+        note.write_text("---\n" + frontmatter + text[end:], encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        raise PipelineError("FILE_WRITE_FAILED", "frames", f"无法把抽帧清单写入笔记 YAML：{exc}") from exc
 
 
 def extract_candidate(ffmpeg: str, source: str, seconds: float, target: Path, timeout: int) -> bool:
@@ -244,7 +272,21 @@ def main(argv: list[str] | None = None) -> int:
         emit_result("error", stage="frames", code=code, message=message, successful=successful, failures=failures, coverage=coverage)
         return 2
     manifest = assets_dir / "frame-manifest.json"
-    manifest.write_text(json.dumps({"skill_version": version_text(), "frames": successful, "failures": failures}, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_payload = {
+        "status": "ok",
+        "skill_version": VERSION,
+        "video_id": video_id,
+        "note": str(args.note.resolve()),
+        "plan_count": len(plan),
+        "coverage": coverage,
+        "frames": successful,
+        "failures": failures,
+    }
+    try:
+        manifest.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise PipelineError("FILE_WRITE_FAILED", "frames", f"无法写入抽帧清单：{exc}") from exc
+    attach_manifest_to_note(args.note, manifest, Path(args.vault))
     emit_result("ok", stage="frames", note=str(args.note), manifest=str(manifest), screenshots=successful, failures=failures, coverage=coverage, elapsed_seconds=args.deadline - deadline.remaining())
     return 0
 
