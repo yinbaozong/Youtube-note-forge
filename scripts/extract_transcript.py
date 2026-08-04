@@ -5,9 +5,12 @@ Extract video learning material for Obsidian.
 The pipeline is intentionally layered:
 1. Fetch metadata with yt-dlp.
 2. Prefer platform subtitles/captions.
-3. Fall back to local ASR when captions are unavailable.
-4. Save cover/keyframe images when possible.
-5. Write an Obsidian Markdown source note for later AI learning synthesis.
+3. Optionally run local ASR only when explicitly requested.
+4. Save a cover and write an Obsidian Markdown source note.
+
+Targeted article screenshots are handled by extract_frames.py after an agent
+has mapped the transcript to the note outline. This script never opens a
+browser and never downloads video merely to create screenshots.
 """
 
 from __future__ import annotations
@@ -22,27 +25,22 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from video_common import Deadline, PipelineError, VERSION, emit_result, version_text
+
 
 DEFAULT_LANGS = "zh-Hans,zh-CN,zh,zh-TW,en.*,en,ja.*,all"
-DEFAULT_BROWSERS = ("edge", "chrome", "firefox")
 OBSIDIAN_LINK_SPECIAL_CHARS = r"[#^[\]]"
 SKILL_DIR = Path(__file__).resolve().parent.parent
-AUTO_COOKIES_PATH = SKILL_DIR / "cookies.txt"
-CREDENTIALS_DIR = Path.home() / ".config" / "opencode" / "credentials" / "youtube-note-forge"
+CREDENTIALS_DIR = Path.home() / ".config" / "opencode" / "credentials" / "youtube-transcript"
 CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
 YOUTUBE_COOKIES_PATH = CREDENTIALS_DIR / "cookies.youtube.txt"
 BILIBILI_COOKIES_PATH = CREDENTIALS_DIR / "cookies.bilibili.txt"
-CACHE_DIR = SKILL_DIR / ".cache"
-AUTH_COOKIES_PATH = SKILL_DIR / "youtube-auth.cookies.txt"
-AUTH_SCRIPT_PATH = Path(__file__).resolve().parent / "open_chrome_login.js"
-PROBE_SCRIPT_PATH = Path(__file__).resolve().parent / "probe_youtube_page.js"
-RECORD_SCRIPT_PATH = Path(__file__).resolve().parent / "record_youtube_audio.js"
-CLOSE_SCRIPT_PATH = Path(__file__).resolve().parent / "close_auth_browser.js"
 
 
 @dataclass
@@ -237,106 +235,6 @@ def run_subprocess(args: list[str], *, check: bool = False, timeout: int = 90) -
     return result
 
 
-def auth_profile_has_cookies(profile_dir: Path) -> bool:
-    return (profile_dir / "Default" / "Network" / "Cookies").exists() or (profile_dir / "Default" / "Cookies").exists()
-
-
-def prepare_browser_auth_profile(url: str, profile_dir: str | None, force_login: bool) -> Path:
-    if not AUTH_SCRIPT_PATH.exists():
-        raise RuntimeError(f"Auth helper script not found: {AUTH_SCRIPT_PATH}")
-
-    resolved_profile = Path(profile_dir).expanduser() if profile_dir else SKILL_DIR / "chrome-auth-profile"
-    if force_login or not auth_profile_has_cookies(resolved_profile):
-        cmd = [
-            "node",
-            str(AUTH_SCRIPT_PATH),
-            url,
-            "--profile-dir",
-            str(resolved_profile),
-        ]
-        completed = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")
-        if completed.returncode != 0:
-            raise RuntimeError("Chrome login helper failed. See the auth helper output above.")
-    else:
-        print(f"Using existing dedicated Chrome profile cookies: {resolved_profile}")
-    return resolved_profile
-
-
-def default_auth_profile(profile_dir: str | None) -> Path:
-    return Path(profile_dir).expanduser() if profile_dir else SKILL_DIR / "chrome-auth-profile"
-
-
-def browser_probe_metadata(url: str, profile_dir: Path, port: int) -> dict:
-    if not PROBE_SCRIPT_PATH.exists():
-        raise RuntimeError(f"Browser probe script not found: {PROBE_SCRIPT_PATH}")
-    cmd = [
-        "node",
-        str(PROBE_SCRIPT_PATH),
-        url,
-        "--profile-dir",
-        str(profile_dir),
-        "--port",
-        str(port),
-    ]
-    result = run_subprocess(cmd)
-    if result.returncode != 0:
-        raise RuntimeError(command_failure_message(result))
-    data = json.loads(result.stdout)
-    return {
-        "id": data.get("id") or sanitize_filename(data.get("title") or "youtube"),
-        "title": data.get("title") or "YouTube Video",
-        "channel": data.get("channel") or "YouTube",
-        "webpage_url": url,
-        "original_url": url,
-        "duration": data.get("duration") or 0,
-        "description": data.get("description") or "",
-        "chapters": [],
-        "subtitles": {},
-        "automatic_captions": {},
-        "_browser_probe": data,
-    }
-
-
-def record_audio_from_browser(url: str, tmp_dir: Path, profile_dir: Path, port: int, max_seconds: int, playback_rate: float) -> Path:
-    if not RECORD_SCRIPT_PATH.exists():
-        raise RuntimeError(f"Browser audio recorder script not found: {RECORD_SCRIPT_PATH}")
-    output = tmp_dir / "browser-audio.webm"
-    cmd = [
-        "node",
-        str(RECORD_SCRIPT_PATH),
-        url,
-        "--output",
-        str(output),
-        "--profile-dir",
-        str(profile_dir),
-        "--port",
-        str(port),
-        "--max-seconds",
-        str(max_seconds),
-        "--playback-rate",
-        str(playback_rate),
-    ]
-    completed = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")
-    if completed.returncode != 0:
-        raise RuntimeError("Browser audio recording failed. See recorder output above.")
-    if not output.exists() or output.stat().st_size == 0:
-        raise RuntimeError("Browser audio recording produced an empty file.")
-    return output
-
-
-def close_auth_browser(port: int) -> None:
-    if not CLOSE_SCRIPT_PATH.exists():
-        return
-    subprocess.run(
-        ["node", str(CLOSE_SCRIPT_PATH), "--port", str(port)],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-
 def command_failure_message(result: RunResult) -> str:
     cmd = " ".join(result.args)
     stderr = result.stderr.strip()
@@ -349,20 +247,19 @@ class YtDlp:
     def __init__(
         self,
         cookies: str | None,
-        cookies_from_browser: str | None,
         no_cookies: bool,
         proxy: str | None,
         auto_cookies_path: Path | None = None,
+        deadline: Deadline | None = None,
     ):
         self.proxy = proxy
         self.auto_cookies_path = auto_cookies_path
+        self.deadline = deadline
         self.modes: list[tuple[str, list[str]]] = []
         if no_cookies:
             self.modes.append(("no cookies", []))
         elif cookies:
             self.modes.append((f"cookies file {cookies}", ["--cookies", cookies]))
-        elif cookies_from_browser and cookies_from_browser != "auto":
-            self.modes.append((f"browser cookies {cookies_from_browser}", ["--cookies-from-browser", cookies_from_browser]))
         else:
             if auto_cookies_path and auto_cookies_path.exists():
                 self.modes.append((f"cookies file {auto_cookies_path}", ["--cookies", str(auto_cookies_path)]))
@@ -382,14 +279,15 @@ class YtDlp:
                 "--socket-timeout",
                 "20",
                 "--retries",
-                "2",
+                "1",
                 "--fragment-retries",
-                "2",
+                "1",
                 *proxy_args,
                 *credential_args,
                 *args,
             ]
-            result = run_subprocess(full_args, timeout=timeout)
+            effective_timeout = self.deadline.timeout_for(timeout) if self.deadline else timeout
+            result = run_subprocess(full_args, timeout=effective_timeout)
             result.credential_label = label
             if result.returncode == 0:
                 remember_working_cookie(credential_args)
@@ -416,7 +314,8 @@ class YtDlp:
                         *backup_args,
                         *args,
                     ]
-                    backup_result = run_subprocess(backup_full_args, timeout=timeout)
+                    backup_timeout = self.deadline.timeout_for(timeout) if self.deadline else timeout
+                    backup_result = run_subprocess(backup_full_args, timeout=backup_timeout)
                     backup_result.credential_label = label + " lastgood"
                     if backup_result.returncode == 0:
                         original_cookie = cookie_arg_path(credential_args)
@@ -1540,6 +1439,7 @@ def create_markdown(
     lines: list[str] = [
         "---",
         f"title: {yaml_scalar(title)}",
+        f"skill_version: {yaml_scalar(VERSION)}",
         f"filename_title_rule: {yaml_scalar('中文标题 - English Title')}",
         f"english_title_suggestion: {yaml_scalar(title)}",
         f"channel: {yaml_scalar(channel)}",
@@ -1605,7 +1505,7 @@ def create_markdown(
         [
             "## 学习笔记整理任务",
             "",
-            "> 请基于本文件中的视频信息、视频描述、关键画面和单独保存的 SRT 字幕，把当前文档整理成一份适合长期复习的中文 Obsidian 学习笔记。不要只做摘要，要帮助真正理解、复述、应用和举一反三。信息不足时标注“待确认”。",
+            "> 先依据 SRT 为重要正文小节制定画面计划，再运行 `extract_frames.py`。画面计划成功后，基于本文件中的视频信息、视频描述、关键画面和单独保存的 SRT 字幕整理中文学习笔记。不要只做摘要；信息不足时标注“待确认”。",
             "",
             "### 必须遵守",
             "",
@@ -1613,8 +1513,8 @@ def create_markdown(
             "2. 正文不要写顶层 `# 标题`，正文直接从 `## 一句话摘要` 开始。",
             "3. 正文使用中文表达。除必要专业术语、产品名、代码命令、模型名、论文名、链接和 YAML 外，不要夹杂英文句子或英文小标题。",
             "4. 关键 English terms 可以保留英文原词，但第一次出现时必须用中文解释它在本视频语境中的含义。",
-            "5. 如果有关键截图，`## 详细内容总结` 中至少插入 2 张有价值截图；长视频或操作演示类视频应插入更多。每张图下面写一句中文说明：这张图证明/展示/对比了什么。",
-            "6. 如果没有任何可用截图，必须在 `## 详细内容总结` 开头标注：`待确认：本次未提取到可用截图。` 不要假装有图。",
+            "5. 先完成画面计划和定点抽帧。`## 详细内容总结` 必须插入每个必需章节的对应截图；每张图下面写一句中文说明：这张图证明/展示/对比了什么。",
+            "6. 抽帧失败时立即停止并报告，不要改用浏览器、下载完整视频或临时凑图。",
             "7. 原始字幕不要粘贴到正文，文末只保留 SRT 字幕链接。",
             "8. 最终回答用户前，必须回看当前文档并完成文末的“输出自检清单”。如有一项不满足，先继续修改当前文档，不要提前结束。",
             "",
@@ -1671,38 +1571,29 @@ def create_markdown(
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract video transcript/materials to an Obsidian Markdown note.")
+    parser = argparse.ArgumentParser(description="Extract video transcript and source material for an Obsidian note.")
     parser.add_argument("url", nargs="?", help="YouTube, Bilibili, or any yt-dlp supported video URL")
     parser.add_argument("output_filename", nargs="?", help="Optional output Markdown filename")
     parser.add_argument("--vault", default=str(Path.home() / "Documents" / "Obsidian Vault"), help="Obsidian vault root")
-    parser.add_argument("--output-dir", default="Transcriptions", help="Output folder relative to vault root")
-    parser.add_argument("--cookies", help="Path to cookies.txt")
-    parser.add_argument("--cookies-from-browser", default="auto", help="Compatibility option; default auto uses saved cookie files or public access")
-    parser.add_argument("--no-cookies", action="store_true", help="Do not use saved cookie files")
-    parser.add_argument("--auth-browser", action="store_true", help="Disabled compatibility flag; this skill never opens browsers")
-    parser.add_argument("--no-auth-browser", action="store_true", help="Deprecated compatibility flag")
-    parser.add_argument("--auth-profile-dir", help="Dedicated Chrome user-data-dir for --auth-browser")
-    parser.add_argument("--auth-port", type=int, default=9222, help="Chrome DevTools port for --auth-browser")
-    parser.add_argument("--auth-timeout", type=int, default=300000, help="Deprecated; auth-browser now waits until the normal Chrome login window is closed")
-    parser.add_argument("--force-auth-login", action="store_true", help="Open the dedicated stable Chrome login window even if saved auth cookies already exist")
-    parser.add_argument("--keep-auth-browser-open", action="store_true", help="Deprecated for normal Chrome login mode")
-    parser.add_argument("--browser-audio-fallback", action="store_true", help="Deprecated and ignored; the skill now fails fast instead of opening automated browser fallbacks")
-    parser.add_argument("--browser-audio-max-seconds", type=int, default=1800, help="Deprecated and ignored")
-    parser.add_argument("--browser-audio-playback-rate", type=float, default=2.0, help="Deprecated and ignored")
-    parser.add_argument("--proxy", help="Proxy URL passed to yt-dlp, e.g. http://127.0.0.1:7897 or socks5://127.0.0.1:7897")
+    parser.add_argument("--output-dir", default="YouTube video", help="Output folder relative to vault root")
+    parser.add_argument("--cookies", help="Explicit cookies.txt path for this run")
+    parser.add_argument("--no-cookies", action="store_true", help="Do not use saved cookies")
+    parser.add_argument("--proxy", help="Proxy URL passed to yt-dlp")
     parser.add_argument("--langs", default=DEFAULT_LANGS, help="Comma-separated subtitle language priority")
-    parser.add_argument("--no-asr", action="store_true", default=True, help="Do not fall back to ASR when subtitles are unavailable; default")
-    parser.add_argument("--allow-asr", dest="no_asr", action="store_false", help="Allow ASR fallback by downloading audio. Slower and disabled by default.")
-    parser.add_argument("--force-asr", action="store_true", help="Skip platform subtitles and transcribe audio")
-    parser.add_argument("--asr-model", default="base", help="faster-whisper model name for ASR fallback")
-    parser.add_argument("--max-keyframes", type=int, default=16, help="Maximum article screenshots to extract; set 0 to disable")
-    parser.add_argument("--no-keyframes", action="store_true", help="Skip video frame extraction")
-    parser.add_argument("--write-canvas", action="store_true", help="Write a Canvas file. Disabled by default.")
-    parser.add_argument("--keep-temp", action="store_true", help="Keep temporary downloaded media")
-    parser.add_argument("--self-test", action="store_true", help="Create a local sample note and SRT without contacting a video platform")
+    parser.add_argument("--allow-asr", action="store_true", help="Explicitly allow slower audio download and local ASR")
+    parser.add_argument("--force-asr", action="store_true", help="Skip platform subtitles and run ASR; requires --allow-asr")
+    parser.add_argument("--asr-model", default="base", help="faster-whisper model name")
+    parser.add_argument("--deadline", type=int, default=300, help="Total material extraction deadline in seconds")
+    parser.add_argument("--keep-temp", action="store_true", help="Keep temporary downloaded audio only when ASR was requested")
+    parser.add_argument("--self-test", action="store_true", help="Create a local sample note and SRT without platform access")
+    parser.add_argument("--version", action="store_true", help="Print installed skill version")
     args = parser.parse_args(argv)
-    if not args.self_test and not args.url:
-        parser.error("url is required unless --self-test is used")
+    if not args.version and not args.self_test and not args.url:
+        parser.error("url is required unless --self-test or --version is used")
+    if args.force_asr and not args.allow_asr:
+        parser.error("--force-asr requires explicit --allow-asr")
+    if args.deadline < 30:
+        parser.error("--deadline must be at least 30 seconds")
     return args
 
 
@@ -1738,11 +1629,15 @@ def run_self_test(output_dir: Path, vault_root: Path) -> int:
     output_file.write_text(markdown, encoding="utf-8")
     print(f"[OK] Self-test note: {output_file}")
     print(f"[OK] Self-test transcript: {transcript_file}")
+    emit_result("ok", stage="self_test", note=str(output_file), transcript=str(transcript_file), screenshots=[])
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if args.version:
+        print(version_text())
+        return 0
     vault_root = Path(args.vault).expanduser()
     output_dir = vault_root / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1750,20 +1645,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return run_self_test(output_dir, vault_root)
 
-    if args.auth_browser:
-        raise RuntimeError(
-            "--auth-browser is disabled. Export a fresh cookies.txt instead; this skill never opens or terminates browsers."
-        )
-
     automatic_cookie = platform_cookie_path(args.url)
+    deadline = Deadline(args.deadline)
     runner = YtDlp(
         cookies=args.cookies,
-        cookies_from_browser=args.cookies_from_browser,
         no_cookies=args.no_cookies,
         proxy=args.proxy,
-        auto_cookies_path=automatic_cookie,
+        auto_cookies_path=None if args.no_cookies else automatic_cookie,
+        deadline=deadline,
     )
-    if not args.cookies and args.cookies_from_browser == "auto" and not args.no_cookies:
+    if not args.cookies and not args.no_cookies:
         if automatic_cookie and automatic_cookie.exists():
             print(f"Using saved {video_platform(args.url)} cookies: {automatic_cookie}")
         else:
@@ -1794,8 +1685,13 @@ def main(argv: list[str] | None = None) -> int:
                 warnings.append(f"Subtitle download failed: {subtitle_error.strip()[:500]}")
 
         if not transcript_entries:
-            if args.no_asr:
-                raise RuntimeError("No usable subtitles were found and ASR fallback is disabled.")
+            if not args.allow_asr:
+                raise PipelineError(
+                    "SUBTITLE_UNAVAILABLE",
+                    "transcript",
+                    "没有可用字幕，且未明确允许 ASR。",
+                    action="如接受下载音频和更长耗时，请明确使用 --allow-asr。",
+                )
             print("No usable subtitles found; downloading audio for ASR fallback...")
             audio_path = download_audio(runner, args.url, tmp_dir)
             transcript_entries, transcript_source = transcribe_audio(audio_path, args.asr_model)
@@ -1807,7 +1703,7 @@ def main(argv: list[str] | None = None) -> int:
         transcript_file = output_dir / "transcripts" / f"{output_file.stem}.srt"
         write_srt(transcript_entries, transcript_file)
 
-        print("Saving cover/visual assets...")
+        print("Saving cover image...", flush=True)
         cover_path, frame_paths, visual_warnings = save_visual_assets(
             runner,
             args.url,
@@ -1815,8 +1711,8 @@ def main(argv: list[str] | None = None) -> int:
             transcript_entries,
             output_file,
             tmp_dir,
-            max_keyframes=max(args.max_keyframes, 0),
-            skip_keyframes=True if args.max_keyframes <= 0 else args.no_keyframes,
+            max_keyframes=0,
+            skip_keyframes=True,
         )
         warnings.extend(visual_warnings)
 
@@ -1834,32 +1730,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         output_file.write_text(markdown, encoding="utf-8")
 
-        canvas_file = None
-        if args.write_canvas:
-            canvas = create_canvas(
-                output_file=output_file,
-                vault_root=vault_root,
-                metadata=metadata,
-                transcript_source=transcript_source,
-                transcript_language=transcript_language,
-                cover_path=cover_path,
-                frame_paths=frame_paths,
-                transcript_entries=transcript_entries,
-                transcript_path=transcript_file,
-            )
-            canvas_file = output_file.with_suffix(".canvas")
-            canvas_file.write_text(json.dumps(canvas, ensure_ascii=False, indent=2), encoding="utf-8")
-
         print(f"[OK] Saved note: {output_file}")
         print(f"[OK] Saved transcript: {transcript_file}")
-        if canvas_file:
-            print(f"[OK] Saved canvas: {canvas_file}")
         if cover_path:
             print(f"[OK] Saved cover: {cover_path}")
-        if frame_paths:
-            print(f"[OK] Saved {len(frame_paths)} keyframe(s): {frame_paths[0].parent}")
         if warnings:
             print("[WARN] " + " | ".join(warnings))
+        emit_result(
+            "ok",
+            stage="materials",
+            url=args.url,
+            note=str(output_file),
+            transcript=str(transcript_file),
+            cover=str(cover_path) if cover_path else None,
+            screenshots=[],
+            elapsed_seconds=args.deadline - deadline.remaining(),
+        )
         return 0
     finally:
         if args.keep_temp:
@@ -1872,7 +1758,20 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
+        emit_result("error", stage="cancelled", code="CANCELLED", message="用户取消了任务。")
         raise
+    except PipelineError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        emit_result("error", stage=exc.stage, code=exc.code, message=str(exc), action=exc.action)
+        raise SystemExit(2)
     except Exception as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
+        text = str(exc).lower()
+        if "saved youtube cookies were rejected" in text or "cookies were rejected" in text:
+            code = "COOKIE_REJECTED"
+        elif "sign in to confirm" in text or "authentication may be required" in text:
+            code = "AUTH_REQUIRED"
+        else:
+            code = "EXTRACTION_FAILED"
+        emit_result("error", stage="materials", code=code, message=str(exc))
         raise SystemExit(1)
