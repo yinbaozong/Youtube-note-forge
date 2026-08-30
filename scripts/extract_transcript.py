@@ -31,7 +31,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from video_common import Deadline, PipelineError, VERSION, emit_result, version_text
+from video_common import Deadline, PipelineError, VERSION, emit_progress, emit_result, version_text
 
 
 DEFAULT_LANGS = "zh-Hans,zh-CN,zh,zh-TW,en.*,en,ja.*,all"
@@ -1408,6 +1408,7 @@ def create_markdown(
         "---",
         f"title: {yaml_scalar(title)}",
         f"skill_version: {yaml_scalar(VERSION)}",
+        "quality_profile_version: 1",
         f"filename_title_rule: {yaml_scalar('中文标题 - English Title')}",
         f"english_title_suggestion: {yaml_scalar(title)}",
         f"channel: {yaml_scalar(channel)}",
@@ -1591,8 +1592,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"No saved cookies for {video_platform(args.url)}; trying public access without cookies.")
 
+    emit_progress("materials", "正在读取视频元数据。", percent=8)
     print(f"Extracting metadata: {args.url}")
     metadata = extract_metadata(runner, args.url)
+    emit_progress("materials", "元数据已读取，正在获取字幕。", percent=13)
     title = metadata.get("title") or metadata.get("id") or "video"
     output_file = output_dir / (args.output_filename or (suggested_note_filename(title) + ".md"))
 
@@ -1606,6 +1609,7 @@ def main(argv: list[str] | None = None) -> int:
 
         choice = None if args.force_asr else choose_subtitle(metadata, args.langs)
         if choice:
+            emit_progress("materials", f"正在下载 {choice.lang} 字幕。", percent=18)
             print(f"Downloading subtitles: {choice.lang} ({choice.source})")
             subtitle_file, subtitle_error = download_subtitle(runner, args.url, metadata, choice, tmp_dir)
             if subtitle_file:
@@ -1660,6 +1664,7 @@ def main(argv: list[str] | None = None) -> int:
             warnings=warnings,
         )
         output_file.write_text(markdown, encoding="utf-8")
+        emit_progress("planning", "字幕、SRT 和封面已就绪，正在规划文章与截图。", percent=28)
 
         print(f"[OK] Saved note: {output_file}")
         print(f"[OK] Saved transcript: {transcript_file}")

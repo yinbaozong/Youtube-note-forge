@@ -3,7 +3,7 @@ name: youtube-transcript
 description: Use for YouTube, Bilibili, and other video URLs when the user wants a Chinese Obsidian learning note with SRT subtitles, transcript-guided screenshots, and a fixed fail-fast workflow. Run the provided scripts only; never use browser automation, Chrome for Testing, Puppeteer, Canvas, or unbounded retries.
 ---
 
-# YouTube Transcript v3.0.2
+# YouTube Transcript v3.3.0
 
 Use this Skill as a strict state machine. Do not improvise alternate extraction paths.
 
@@ -27,7 +27,7 @@ For each URL, complete the following steps before moving to the next URL. Stop t
 python .obsidian/skills/youtube-transcript/scripts/extract_transcript.py "<url>" --output-dir "YouTube video" --deadline 300
 ```
 
-2. Read the generated note and its SRT. Create a non-empty JSON frame plan with no more than 24 items. Each item has `section_id`, `timestamp`, `purpose`, and `required`. Choose time points that directly support an important detailed-summary section. Do not rename or rewrite the note yet. Do not write probe scripts or inspect video formats manually.
+2. Read the generated note and its SRT. Create one JSON plan with `article_outline` and `frames`. `article_outline` contains 3-8 transcript-derived chapters; every item has `section_id`, `title`, `start`, `end`, `core_claims`, and `learning_goal`. Choose frames by learning value, normally one required frame for each visually meaningful chapter plus optional evidence for distinct steps or results. Most videos need 6-14 frames; 24 is only the hard safety limit, never a target. Do not create multiple near-identical time points merely to increase the count. Every frame has `section_id`, `timestamp`, `purpose`, and `required`. Use the same `section_id` to bind each screenshot to its detailed-summary chapter. Do not rename or rewrite the note yet. Do not write probe scripts or inspect video formats manually.
 3. Extract planned frames exactly once. After a successful materials result, this is the only allowed next executable command:
 
 ```powershell
@@ -35,7 +35,7 @@ python .obsidian/skills/youtube-transcript/scripts/extract_frames.py "<url>" --p
 ```
 
 4. Confirm that the frame result has `status: ok`, at least one screenshot, and a real `manifest` path. The script automatically writes `frame_manifest` into the note YAML. If any of these are missing, stop; do not write the final note and do not substitute the cover.
-5. Rename and rewrite the generated note in place according to [references/note-contract.md](references/note-contract.md). Insert every required successful frame into its matching `## 详细内容总结` subsection and add a Chinese explanation below it. Only images listed in the manifest count as screenshots.
+5. Rename and rewrite the generated note in place according to [references/note-contract.md](references/note-contract.md). Under `## 详细内容总结`, use every `article_outline.title` as an exact `###` heading, explain its core claims, and insert every required successful frame into its matching chapter with a Chinese explanation. Only images listed in the manifest count as screenshots.
 6. Validate:
 
 ```powershell
@@ -56,7 +56,7 @@ ASR is disabled by default. Use `--allow-asr` only if the user explicitly accept
 
 - Screenshots are evidence, not decoration.
 - Use demonstrations, interfaces, diagrams, parameters, comparison states, and results.
-- The frame script uses a remote 720p-or-lower stream and never downloads a complete video for screenshots.
+- The frame script first uses a remote 720p-or-lower stream with yt-dlp request headers. If remote seek fails, it may download only an 8-second bounded segment around each planned time point. Temporary segments are deleted immediately and a complete video is never downloaded for screenshots.
 - A required frame failure or less than 70% frame-plan coverage is a hard failure.
 - A cover, thumbnail, manually copied image, or duplicate embed never counts as a keyframe.
 - Keep planned frames even when their overall layouts look similar. Terminal text, code, slides, and UI state changes are useful. Reject only effectively blank black/white frames; do not use OCR, AI image analysis, or perceptual duplicate filtering.
@@ -66,10 +66,11 @@ ASR is disabled by default. Use `--allow-asr` only if the user explicitly accept
 ## Final note requirements
 
 - Filename: `中文标题 - English Title`.
-- YAML contains `skill_version: 3.0.2` and a valid `frame_manifest` written by `extract_frames.py`.
+- YAML contains `skill_version: 3.3.0`, `quality_profile_version: 1`, and a valid `frame_manifest` written by `extract_frames.py`.
 - Body begins at `## 一句话摘要` without a duplicate H1 title.
 - Remove source status, video description, visual-material indexes, extraction warnings, task instructions, and self-check sections from the final body; YAML already carries source metadata.
 - Use Chinese first; explain necessary English terminology at first use.
 - Let the transcript determine the article outline and depth. Images support the explanation; never shorten or omit important content merely because a matching frame is unavailable.
+- Match article depth to video duration. Every planned chapter needs a real explanation, video evidence or example, and a clear learning implication. Avoid generic filler and repeated paragraphs.
 - Link the SRT at the end. Do not paste raw transcript text.
 - Remove the self-check checklist before final completion.

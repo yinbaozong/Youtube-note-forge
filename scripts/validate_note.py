@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path
 
-from video_common import VERSION, emit_result, version_text
+from video_common import VERSION, emit_progress, emit_result, version_text
 
 
 SECTIONS = [
@@ -79,6 +79,30 @@ def frontmatter_value(frontmatter: str, key: str) -> str | None:
     return raw
 
 
+def parse_duration_seconds(raw: str | None) -> int:
+    if not raw:
+        return 0
+    try:
+        parts = [int(float(part)) for part in raw.strip().split(":")]
+    except ValueError:
+        return 0
+    if not 1 <= len(parts) <= 3:
+        return 0
+    total = 0
+    for part in parts:
+        total = total * 60 + part
+    return max(0, total)
+
+
+def detailed_chapters(details: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"^###\s+(.+?)\s*$", details, flags=re.MULTILINE))
+    chapters: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(details)
+        chapters.append((match.group(1).strip(), details[match.end() : end]))
+    return chapters
+
+
 def load_frame_manifest(frontmatter: str, note: Path, vault: Path) -> tuple[dict, Path | None, list[dict[str, str]]]:
     errors: list[dict[str, str]] = []
     raw = frontmatter_value(frontmatter, "frame_manifest")
@@ -107,6 +131,8 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
     frontmatter, body = split_frontmatter(text)
     if frontmatter_value(frontmatter, "skill_version") != VERSION:
         errors.append({"code": "VERSION_MISSING", "message": f"YAML 必须包含 skill_version: {VERSION}。"})
+    if frontmatter_value(frontmatter, "quality_profile_version") != "1":
+        errors.append({"code": "QUALITY_PROFILE_MISSING", "message": "YAML 必须包含 quality_profile_version: 1。"})
     if re.search(r"^#\s+", body, flags=re.MULTILINE):
         errors.append({"code": "DUPLICATE_TITLE", "message": "正文不能包含顶层 # 标题。"})
     positions: list[int] = []
@@ -155,6 +181,48 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
     for path, frame in manifest_frames.items():
         if frame.get("required") and path not in embedded_set:
             errors.append({"code": "REQUIRED_FRAME_NOT_EMBEDDED", "message": f"必需关键帧未插入详细内容总结：{path.name}"})
+    duration = parse_duration_seconds(frontmatter_value(frontmatter, "duration"))
+    if duration:
+        chinese_detail = len(re.findall(r"[\u3400-\u9fff]", details))
+        minimum_detail = max(900, min(4000, int(duration / 60 * 80)))
+        if chinese_detail < minimum_detail:
+            errors.append(
+                {
+                    "code": "DETAIL_CONTENT_SHALLOW",
+                    "message": f"详细内容总结只有 {chinese_detail} 个中文字符，当前视频至少需要约 {minimum_detail} 个。",
+                }
+            )
+        chapters = detailed_chapters(details)
+        minutes = duration / 60
+        minimum_chapters = 3 if minutes <= 10 else 4 if minutes <= 30 else 5 if minutes <= 60 else 6
+        if len(chapters) < minimum_chapters:
+            errors.append(
+                {
+                    "code": "DETAIL_CHAPTERS_INSUFFICIENT",
+                    "message": f"详细内容总结只有 {len(chapters)} 个三级章节，当前视频至少需要 {minimum_chapters} 个。",
+                }
+            )
+        for title, chapter in chapters:
+            chapter_chinese = len(re.findall(r"[\u3400-\u9fff]", chapter))
+            if chapter_chinese < 120:
+                errors.append(
+                    {
+                        "code": "DETAIL_CHAPTER_SHALLOW",
+                        "message": f"详细章节“{title}”解释不足，至少需要约 120 个中文字符。",
+                    }
+                )
+        actions = section_body(body, "行动建议-举一反三")
+        if len(re.findall(r"[\u3400-\u9fff]", actions)) < 120:
+            errors.append({"code": "ACTION_ADVICE_GENERIC", "message": "行动建议过于简略，必须包含具体练习、迁移应用和继续深入方向。"})
+    outline = manifest.get("article_outline")
+    if isinstance(outline, list) and outline:
+        detail_titles = {title for title, _ in detailed_chapters(details)}
+        for item in outline:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if title and title not in detail_titles:
+                errors.append({"code": "OUTLINE_CHAPTER_MISSING", "message": f"详细内容总结缺少画面计划章节：{title}"})
     transcript = section_body(body, "原始字幕 Transcript")
     srt_links = re.findall(r"\[\[([^\]]+\.srt[^\]]*)\]\]", transcript, flags=re.IGNORECASE)
     if not srt_links:
@@ -167,6 +235,14 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
         errors.append({"code": "RAW_TRANSCRIPT_PRESENT", "message": "正文不能粘贴原始字幕。"})
     if "- [ ]" in body:
         errors.append({"code": "CHECKLIST_UNFINISHED", "message": "输出自检清单未清除或完成。"})
+    normalized_paragraphs = [
+        re.sub(r"\s+", "", paragraph)
+        for paragraph in re.split(r"\n\s*\n", body)
+        if len(re.findall(r"[\u3400-\u9fff]", paragraph)) >= 60
+    ]
+    repeated = {paragraph for paragraph in normalized_paragraphs if normalized_paragraphs.count(paragraph) > 1}
+    if repeated:
+        errors.append({"code": "REPEATED_CONTENT", "message": "正文包含重复的长段落，必须合并或删除。"})
     chinese = len(re.findall(r"[\u3400-\u9fff]", body))
     latin = len(re.findall(r"[A-Za-z]", re.sub(r"`[^`]*`|https?://\S+", "", body)))
     if chinese < 120 or chinese / max(1, chinese + latin) < 0.45:
@@ -185,10 +261,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.note:
         parser.error("note is required unless --version is used")
+    emit_progress("validation", "正在校验文章结构、深度、中文比例、截图和 SRT 链接。", percent=92)
     errors = validate(args.note, args.vault)
     if errors:
         emit_result("error", stage="note_validation", code="NOTE_VALIDATION_FAILED", note=str(args.note), errors=errors)
         return 2
+    emit_progress("validation", "质量校验通过，正在返回生成结果。", percent=98)
     emit_result("ok", stage="note_validation", note=str(args.note))
     return 0
 

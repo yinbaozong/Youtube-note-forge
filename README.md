@@ -2,7 +2,7 @@
 
 Turn long videos into Obsidian-ready learning notes, with transcripts, SRT files, cover images, and useful screenshots.
 
-YouTube Note Forge v3.0.2 is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then use the fixed workflow to forge it into a structured Chinese note with transcript-guided visual evidence.
+YouTube Note Forge v3.3.0 is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then use the fixed workflow to forge it into a structured Chinese note with transcript-guided visual evidence.
 
 ![YouTube Note Forge workflow](docs/workflow.svg)
 
@@ -19,7 +19,7 @@ YouTube Note Forge v3.0.2 is an agent skill for people who do serious learning f
 1. Reads metadata with `yt-dlp`.
 2. Prefers platform subtitles and saves them as `.srt`.
 3. Optionally falls back to local ASR with `faster-whisper`.
-4. Extracts a cover first; then extracts only planned 720p-or-lower frames without downloading the whole video.
+4. Extracts a cover first; then maps planned timestamps directly to bounded 720p HLS media segments. If that path is unavailable, it downloads only bounded 8-second temporary segments, never the whole video.
 5. Validates the finished Chinese learning note and stops after one bounded repair attempt.
 
 ![Generated output structure](docs/output-structure.svg)
@@ -63,6 +63,35 @@ python scripts/extract_transcript.py --self-test --vault ./_verify --output-dir 
 ```
 
 If this succeeds, your Python dependencies and Markdown/SRT generation path are working. Real video extraction can still require platform access or valid cookies.
+
+## Chrome Extension
+
+The local YouTube Reader extension reads the current YouTube URL and its `.youtube.com` cookies, then talks to a desktop companion bound only to `127.0.0.1:32191`. The companion starts the existing `/video-note` OpenCode command. Neither component analyzes video or writes notes, and cookie values are never stored in Chrome extension storage.
+
+Install the Skill and desktop companion:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+
+Chrome requires one manual step for a local unpacked extension:
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked**.
+4. Select the repository's `extension` directory.
+5. Open the extension settings, select an OpenCode model, optionally enter that provider's API key, and save.
+
+The API key is passed directly to the local companion and stored with OpenCode's existing credentials. Cookie values are sent only over the local loopback connection and saved at the existing `cookies.youtube.txt` path. Obsidian does not need to be open while a job runs. Closing the popup never stops the desktop job; reopening the extension from any YouTube tab reconnects to the same request. The extension badge shows progress or completion, and the finished popup shows the full note path, screenshot count, total runtime, a copy-path action, and an **Open in Obsidian** button. Auto-open is enabled by default and is executed by the desktop companion, so it still works when the popup is closed. A visible **Force stop** button terminates the OpenCode process tree without deleting completed files.
+
+The visible stages are: Cookie sync, OpenCode startup, source material extraction, article and screenshot planning, bounded frame extraction, Chinese note writing, quality validation, and completion. A failed stage returns its machine error code and stops; it does not switch browsers or retry with a different workflow.
+
+Verify or remove the local bridge:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify_install.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
+```
 
 ## Need Help?
 

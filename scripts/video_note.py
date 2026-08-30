@@ -17,6 +17,7 @@ CORE_FILES = (
     "scripts/extract_frames.py",
     "scripts/validate_note.py",
     "scripts/video_common.py",
+    "references/note-contract.md",
 )
 
 

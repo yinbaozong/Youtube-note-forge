@@ -1,0 +1,42 @@
+:root {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #18202a;
+  background: #f4f6f8;
+}
+body { margin: 0; }
+main {
+  width: min(680px, calc(100% - 40px));
+  margin: 48px auto;
+  padding: 28px;
+  background: #fff;
+  border: 1px solid #dce1e7;
+  border-radius: 8px;
+}
+h1 { margin: 0 0 24px; font-size: 24px; letter-spacing: 0; }
+label { display: grid; gap: 8px; margin: 18px 0; font-weight: 600; }
+.check-row { display: flex; align-items: center; gap: 10px; }
+.check-row input { width: 18px; min-height: 18px; margin: 0; }
+input, select {
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #aeb7c2;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+}
+.actions { display: flex; align-items: center; gap: 14px; margin-top: 24px; }
+button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #202936;
+  border-radius: 6px;
+  color: #fff;
+  background: #202936;
+  font-weight: 600;
+}
+button.secondary {
+  color: #202936;
+  background: #fff;
+}
+#status { color: #566270; }

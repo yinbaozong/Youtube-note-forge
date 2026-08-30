@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube 阅读器</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <strong>YouTube 阅读器</strong>
+      <button id="settings" class="icon" title="设置" aria-label="设置">⚙</button>
+    </header>
+    <main>
+      <div class="status-line"><span id="indicator"></span><span id="status">准备就绪</span></div>
+      <div id="stage">等待任务</div>
+      <div class="progress-row">
+        <progress id="progress" max="100" value="0"></progress>
+        <span id="progressText">0%</span>
+      </div>
+      <ol id="timeline" aria-label="任务阶段">
+        <li data-stage="credentials">Cookie</li>
+        <li data-stage="materials">素材</li>
+        <li data-stage="planning">规划</li>
+        <li data-stage="frames">截图</li>
+        <li data-stage="writing">写作</li>
+        <li data-stage="validation">校验</li>
+        <li data-stage="complete">完成</li>
+      </ol>
+      <div id="result" hidden></div>
+    </main>
+    <footer>
+      <button id="start">生成学习笔记</button>
+      <button id="cancel" class="danger" hidden>强制停止</button>
+      <button id="openNote" class="secondary" hidden>在 Obsidian 打开</button>
+      <button id="copyPath" class="secondary" hidden>复制路径</button>
+      <button id="settingsFooter" class="secondary">设置模型</button>
+    </footer>
+    <script src="popup.js"></script>
+  </body>
+</html>

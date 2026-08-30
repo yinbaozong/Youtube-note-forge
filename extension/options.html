@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube 阅读器设置</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>YouTube 阅读器设置</h1>
+      <label>
+        OpenCode 模型
+        <input id="model" list="modelOptions" type="text" autocomplete="off" placeholder="正在读取已安装模型">
+        <datalist id="modelOptions"></datalist>
+      </label>
+      <label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="留空则保留 OpenCode 现有凭据"></label>
+      <label>Obsidian Vault<input id="vault" type="text"></label>
+      <label class="check-row">
+        <input id="autoOpenNote" type="checkbox">
+        <span>完成后自动在 Obsidian 打开笔记</span>
+      </label>
+      <div class="actions">
+        <button id="save">保存并验证</button>
+        <button id="retry" class="secondary" type="button">重新检测</button>
+        <span id="status"></span>
+      </div>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
