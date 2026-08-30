@@ -7,6 +7,7 @@ const progress = document.getElementById("progress");
 const progressText = document.getElementById("progressText");
 const timeline = document.getElementById("timeline");
 const start = document.getElementById("start");
+const resume = document.getElementById("resume");
 const cancel = document.getElementById("cancel");
 const openNote = document.getElementById("openNote");
 const copyPath = document.getElementById("copyPath");
@@ -79,6 +80,7 @@ function render(state) {
   progressText.textContent = percent + "%";
   renderTimeline(stage, state.status);
   start.disabled = running;
+  resume.hidden = !(state.status === "error" && state.code === "TASK_INTERRUPTED");
   cancel.hidden = !(running || state.status === "error");
   cancel.textContent = running ? "强制停止" : "清除任务";
   const taskLines = [];
@@ -112,6 +114,15 @@ start.addEventListener("click", async () => {
     render({ status: "error", message: response.message, stage: "credentials", elapsed_seconds: 0, progress_percent: 0 });
   } else {
     render(response);
+  }
+});
+
+resume.addEventListener("click", async () => {
+  resume.disabled = true;
+  try {
+    render(await send({ type: "resume_job" }));
+  } finally {
+    resume.disabled = false;
   }
 });
 

@@ -3,7 +3,7 @@ name: youtube-transcript
 description: Use for YouTube, Bilibili, and other video URLs when the user wants a Chinese Obsidian learning note with SRT subtitles, transcript-guided screenshots, and a fixed fail-fast workflow. Run the provided scripts only; never use browser automation, Chrome for Testing, Puppeteer, Canvas, or unbounded retries.
 ---
 
-# YouTube Transcript v3.3.2
+# YouTube Transcript v3.4.0
 
 Use this Skill as a strict state machine. Do not improvise alternate extraction paths.
 
@@ -66,7 +66,7 @@ ASR is disabled by default. Use `--allow-asr` only if the user explicitly accept
 ## Final note requirements
 
 - Filename: `中文标题 - English Title`.
-- YAML contains `skill_version: 3.3.2`, `quality_profile_version: 1`, and a valid `frame_manifest` written by `extract_frames.py`.
+- YAML contains `skill_version: 3.4.0`, `quality_profile_version: 1`, and a valid `frame_manifest` written by `extract_frames.py`.
 - Body begins at `## 一句话摘要` without a duplicate H1 title.
 - Remove source status, video description, visual-material indexes, extraction warnings, task instructions, and self-check sections from the final body; YAML already carries source metadata.
 - Use Chinese first; explain necessary English terminology at first use.

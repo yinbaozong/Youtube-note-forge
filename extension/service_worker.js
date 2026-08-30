@@ -110,6 +110,7 @@ function statusPatch(message) {
     current: message.current ?? state.current,
     total: message.total ?? state.total
   };
+  if (message.code) patch.code = message.code;
   for (const key of ["video_title", "video_url", "output_dir"]) {
     if (message[key]) patch[key] = message[key];
   }
@@ -158,7 +159,7 @@ async function pollJob() {
               status: "error",
               stage: "failed",
               code: "TASK_INTERRUPTED",
-              message: "活动任务已经中断，桌面伴侣中没有对应的运行进程。请清除任务后重新生成。"
+              message: "活动任务已经中断。可点击“继续上次任务”，复用已有素材并完成文章。"
             };
       }
       await updateState(statusPatch(message));
@@ -221,6 +222,7 @@ async function startJob() {
     note_path: "",
     screenshot_count: 0,
     screenshot_dir: "",
+    code: "",
     video_title: videoTitle,
     video_url: tab.url,
     output_dir: outputDir,
@@ -247,6 +249,52 @@ async function startJob() {
   } catch (error) {
     await updateState({ status: "error", stage: "failed", message: error.message });
     throw error;
+  }
+}
+
+async function resumeJob() {
+  if (state.status === "running") return state;
+  const settings = await getSettings();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const youtubePattern = /^(https:\/\/(www\.|m\.)?youtube\.com\/(watch|shorts)\b|https:\/\/youtu\.be\/)/;
+  const url = state.video_url || (youtubePattern.test(tab?.url || "") ? tab.url : "");
+  if (!url) throw new Error("找不到上次任务的视频链接，请重新打开原视频页面");
+  const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
+  if (!cookies.length) throw new Error("没有读取到 YouTube Cookie，请先登录 YouTube");
+  const requestId = crypto.randomUUID();
+  const videoTitle = state.video_title || (tab?.title || "上次未完成的视频").replace(/\s+-\s+YouTube$/, "").trim();
+  await updateState({
+    status: "running",
+    stage: "credentials",
+    message: "正在恢复上次任务，并检查可复用的字幕、截图和草稿",
+    elapsed_seconds: 0,
+    progress_percent: 4,
+    current: 0,
+    total: 0,
+    code: "",
+    video_title: videoTitle,
+    video_url: url,
+    output_dir: settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video",
+    request_id: requestId
+  });
+  try {
+    const response = await companionRequest({
+      type: "start_job",
+      request_id: requestId,
+      url,
+      video_title: videoTitle,
+      model: settings.model,
+      vault: settings.vault,
+      auto_open_note: settings.auto_open_note,
+      resume: true,
+      cookies
+    });
+    await updateState(statusPatch(response));
+    startPolling();
+    return state;
+  } catch (error) {
+    await updateState({ status: "error", stage: "failed", message: error.message });
+    return state;
   }
 }
 
@@ -277,6 +325,7 @@ async function cancelJob() {
     note_path: "",
     screenshot_count: 0,
     screenshot_dir: "",
+    code: "",
     video_title: "",
     video_url: "",
     output_dir: "",
@@ -318,6 +367,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return state;
     }
     if (message.type === "start_job") return await startJob();
+    if (message.type === "resume_job") return await resumeJob();
     if (message.type === "cancel_job") {
       await cancelJob();
       return state;

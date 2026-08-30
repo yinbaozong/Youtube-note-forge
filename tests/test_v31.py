@@ -334,7 +334,7 @@ class QualityGateV31Tests(unittest.TestCase):
             vault = Path(raw)
             note = vault / "中文标题 - English Title.md"
             note.write_text(
-                "---\nskill_version: 3.3.2\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
+                "---\nskill_version: 3.4.0\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
                 "## 一句话摘要\n\n这是摘要。\n\n"
                 "## 核心知识点速览\n\n- 知识点。\n\n"
                 "## 详细内容总结\n\n### 第一部分\n\n内容很少。\n\n"

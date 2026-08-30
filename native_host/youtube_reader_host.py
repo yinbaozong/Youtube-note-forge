@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 HOST_NAME = "com.youtube_note_reader.host"
-HOST_VERSION = "3.3.2"
+HOST_VERSION = "3.4.0"
 DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault"
 COOKIE_PATH = Path.home() / ".config" / "opencode" / "credentials" / "youtube-transcript" / "cookies.youtube.txt"
 AUTH_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
@@ -102,7 +102,7 @@ def save_provider_key(provider: str, api_key: str) -> None:
     atomic_write(AUTH_PATH, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
-def build_opencode_command(*, opencode: str, vault: Path, model: str, url: str) -> list[str]:
+def build_opencode_command(*, opencode: str, vault: Path, model: str, url: str, resume: bool = False) -> list[str]:
     validate_youtube_url(url)
     if not MODEL_PATTERN.fullmatch(model):
         raise ValueError("请选择有效的 OpenCode 模型。")
@@ -119,7 +119,7 @@ def build_opencode_command(*, opencode: str, vault: Path, model: str, url: str) 
         str(vault),
         "-m",
         model,
-        url,
+        f"RESUME_EXISTING_TASK {url}" if resume else url,
     ]
 
 
@@ -199,7 +199,7 @@ USER_ERROR_MESSAGES = {
     "FRAME_COVERAGE_INSUFFICIENT": "关键截图成功率不足，任务已停止；不会用封面冒充正文截图。",
     "RESULT_NOTE_MISSING": "OpenCode 没有返回通过校验的笔记路径，任务已停止。",
     "OPENCODE_FAILED": "OpenCode 执行失败，任务已停止。请查看本地任务日志了解技术细节。",
-    "TASK_INTERRUPTED": "桌面伴侣或 OpenCode 在任务完成前退出，任务已经中断。请清除任务后重新生成。",
+    "TASK_INTERRUPTED": "桌面伴侣或 OpenCode 在任务完成前退出。可点击“继续上次任务”，复用已有素材并完成文章。",
 }
 
 
@@ -246,6 +246,7 @@ def interrupted_job_from_log(path: Path) -> dict[str, Any] | None:
             "video_title": str(payload.get("video_title") or ""),
             "video_url": str(payload.get("video_url") or ""),
             "output_dir": str(payload.get("output_dir") or ""),
+            "resume_stage": str(payload.get("stage") or ""),
         }
     return None
 
@@ -516,14 +517,24 @@ class NativeHost:
             model = str(message.get("model") or "")
             cookie_count = save_cookie_snapshot(message.get("cookies") or [])
             executable = shutil.which("opencode") or "opencode"
-            command = build_opencode_command(opencode=executable, vault=vault, model=model, url=url)
+            command = build_opencode_command(
+                opencode=executable,
+                vault=vault,
+                model=model,
+                url=url,
+                resume=bool(message.get("resume")),
+            )
             self.send(
                 {
                     "type": "progress",
                     "request_id": request_id,
                     "status": "running",
                     "stage": "credentials",
-                    "message": f"已保存 {cookie_count} 个 YouTube Cookie，正在启动现有 /video-note Skill。",
+                    "message": (
+                        f"已保存 {cookie_count} 个 YouTube Cookie，正在恢复上次 /video-note 任务。"
+                        if message.get("resume")
+                        else f"已保存 {cookie_count} 个 YouTube Cookie，正在启动现有 /video-note Skill。"
+                    ),
                     "elapsed_seconds": 0,
                     "progress_percent": 4,
                     **task_context,

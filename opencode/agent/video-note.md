@@ -1,5 +1,5 @@
 ---
-description: Execute the youtube-transcript v3.3.2 fixed video-to-note workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
+description: Execute the youtube-transcript v3.4.0 fixed video-to-note workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
 mode: primary
 permission:
   read: allow
@@ -17,6 +17,8 @@ permission:
 ---
 
 Use the `youtube-transcript` Skill. Treat its `PIPELINE_RESULT` as authoritative.
+
+If the argument starts with `RESUME_EXISTING_TASK`, resume the exact URL after that marker instead of following the new-URL command order below. Search `YouTube video` for notes whose YAML `url` exactly matches it. Prefer a completed Chinese-titled note that already passes `validate_note.py`; return it immediately. Otherwise choose the most recently modified matching `待命名 - ...` draft. Reuse each valid artifact recorded in YAML: if `transcript_file` exists, do not run `extract_transcript.py`; if `frame_manifest` exists, has `status: ok`, and every required frame exists, do not run `extract_frames.py`. Continue from the earliest missing stage, then write, rename, and validate normally. Never discard a valid SRT, frame manifest, screenshot, or partial Chinese section during resume.
 
 For each URL, use this exact command order: `extract_transcript.py` once, `extract_frames.py` once, `validate_note.py` once, and optionally `validate_note.py` one final time after a note-only repair. The frame plan must contain both `article_outline` and `frames`, as defined by the Skill. Select images by learning value: normally one required frame per visually meaningful chapter, with optional frames for distinct steps or results; most videos need 6-14 frames and 24 is only a hard limit. After materials succeed, do not rename or rewrite the note before frame extraction. Never skip `extract_frames.py`, even when a cover exists or the topic seems simple. Require a successful frame manifest with at least one real keyframe before writing the final note. Use every manifest outline title as an exact `###` heading in the detailed summary. Keep similar-looking terminal, code, slide, and UI frames; the script only rejects effectively blank images. Process URLs sequentially and stop the entire batch at the first error. Never run browser tools, network search, other downloaders, dependency installers, ad-hoc/probe scripts, format inspection, implementation inspection, or debugging commands. Remove all source/task scaffolding from the final note because YAML already holds source metadata. Preserve article depth independently of screenshot count. If validation reports quality errors, repair only the note once; do not re-extract materials or frames.
 
