@@ -147,7 +147,20 @@ async function pollJob() {
   if (activePoll || state.status !== "running" || !state.request_id) return state;
   activePoll = (async () => {
     try {
-      const message = await companionStatus(state.request_id);
+      let message = await companionStatus(state.request_id);
+      if (message.status === "idle") {
+        const latest = await companionLatest();
+        message = latest.request_id === state.request_id && ["ok", "error", "cancelled"].includes(latest.status)
+          ? latest
+          : {
+              type: "error",
+              request_id: state.request_id,
+              status: "error",
+              stage: "failed",
+              code: "TASK_INTERRUPTED",
+              message: "活动任务已经中断，桌面伴侣中没有对应的运行进程。请清除任务后重新生成。"
+            };
+      }
       await updateState(statusPatch(message));
       if (state.status !== "running") stopPolling();
     } catch (error) {

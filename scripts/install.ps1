@@ -2,7 +2,8 @@
 param(
     [string]$Vault = 'C:\Users\win11\Documents\Obsidian Vault',
     [string]$Python = '',
-    [switch]$SkipDependencies
+    [switch]$SkipDependencies,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,21 @@ function Test-CompanionHealth {
     }
 }
 
+function Get-ActiveCompanionJob {
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.UseProxy = $false
+    $client = [Net.Http.HttpClient]::new($handler)
+    try {
+        $client.Timeout = [TimeSpan]::FromSeconds(3)
+        return ($client.GetStringAsync('http://127.0.0.1:32191/active').GetAwaiter().GetResult() | ConvertFrom-Json)
+    } catch {
+        return $null
+    } finally {
+        $client.Dispose()
+        $handler.Dispose()
+    }
+}
+
 if (-not (Test-Path -LiteralPath $Vault -PathType Container)) {
     throw "Obsidian Vault does not exist: $Vault"
 }
@@ -45,6 +61,11 @@ foreach ($command in @('opencode', 'ffmpeg', 'node')) {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
         throw "Required command is missing: $command"
     }
+}
+
+$activeJob = Get-ActiveCompanionJob
+if ($activeJob -and $activeJob.status -eq 'running' -and -not $Force) {
+    throw "ACTIVE_JOB_RUNNING: A video task is still running ($($activeJob.video_title)). Wait for it to finish or rerun install.ps1 with -Force to interrupt it explicitly."
 }
 
 if ($WhatIfPreference) {

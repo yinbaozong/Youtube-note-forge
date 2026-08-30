@@ -2,7 +2,7 @@
 
 Turn long videos into Obsidian-ready learning notes, with transcripts, SRT files, cover images, and useful screenshots.
 
-YouTube Note Forge v3.3.1 is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then use the fixed workflow to forge it into a structured Chinese note with transcript-guided visual evidence.
+YouTube Note Forge v3.3.2 is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then use the fixed workflow to forge it into a structured Chinese note with transcript-guided visual evidence.
 
 ![YouTube Note Forge workflow](docs/workflow.svg)
 
@@ -119,6 +119,7 @@ C:\Users\win11\Documents\Obsidian Vault\YouTube video\
 - **第一次笔记校验失败**：系统只修改当前笔记一次，不重跑字幕和截图。只有第二次仍失败才报告 `NOTE_VALIDATION_FAILED`。
 - **没有截图**：任务不会进入正式完成状态；读取错误码确认是 Cookie、网络、低清画面还是覆盖不足。
 - **关闭了弹窗**：任务仍在桌面伴侣运行；从任意 YouTube 页面重新打开扩展即可恢复进度。
+- **伴侣被重启**：未完成任务会明确变成 `TASK_INTERRUPTED`，不会继续显示虚假的写作进度。安装和普通重启默认拒绝打断活动任务，只有显式使用 `-Force` 才允许中断。
 
 验证安装：
 

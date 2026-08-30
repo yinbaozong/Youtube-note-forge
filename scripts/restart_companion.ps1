@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$Force)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
@@ -14,6 +14,26 @@ $hostPath = [string]$runtime.host
 $launcher = [string]$runtime.launcher
 foreach ($path in @($hostPath, $launcher)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Desktop companion runtime file is missing: $path" }
+}
+
+function Get-ActiveCompanionJob {
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.UseProxy = $false
+    $client = [Net.Http.HttpClient]::new($handler)
+    try {
+        $client.Timeout = [TimeSpan]::FromSeconds(3)
+        return ($client.GetStringAsync('http://127.0.0.1:32191/active').GetAwaiter().GetResult() | ConvertFrom-Json)
+    } catch {
+        return $null
+    } finally {
+        $client.Dispose()
+        $handler.Dispose()
+    }
+}
+
+$activeJob = Get-ActiveCompanionJob
+if ($activeJob -and $activeJob.status -eq 'running' -and -not $Force) {
+    throw "ACTIVE_JOB_RUNNING: A video task is still running ($($activeJob.video_title)). Wait for it to finish or rerun restart_companion.ps1 with -Force to interrupt it explicitly."
 }
 
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |

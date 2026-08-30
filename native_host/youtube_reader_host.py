@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 HOST_NAME = "com.youtube_note_reader.host"
-HOST_VERSION = "3.3.1"
+HOST_VERSION = "3.3.2"
 DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault"
 COOKIE_PATH = Path.home() / ".config" / "opencode" / "credentials" / "youtube-transcript" / "cookies.youtube.txt"
 AUTH_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
@@ -199,6 +199,7 @@ USER_ERROR_MESSAGES = {
     "FRAME_COVERAGE_INSUFFICIENT": "关键截图成功率不足，任务已停止；不会用封面冒充正文截图。",
     "RESULT_NOTE_MISSING": "OpenCode 没有返回通过校验的笔记路径，任务已停止。",
     "OPENCODE_FAILED": "OpenCode 执行失败，任务已停止。请查看本地任务日志了解技术细节。",
+    "TASK_INTERRUPTED": "桌面伴侣或 OpenCode 在任务完成前退出，任务已经中断。请清除任务后重新生成。",
 }
 
 
@@ -210,6 +211,43 @@ def format_user_error(exc: Exception) -> tuple[str, str]:
         return code, USER_ERROR_MESSAGES[code]
     first_line = technical.splitlines()[0] if technical else "任务失败。"
     return code, first_line[:300]
+
+
+def interrupted_job_from_log(path: Path) -> dict[str, Any] | None:
+    """Convert an unfinished persisted job into a terminal recovery event."""
+    if not path.exists():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    lifecycle_types = {"accepted", "attached", "progress", "pipeline_result", "complete", "error", "cancelled"}
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("type") not in lifecycle_types:
+            continue
+        if payload.get("status") != "running" or not payload.get("request_id"):
+            return None
+        return {
+            "type": "error",
+            "request_id": str(payload["request_id"]),
+            "status": "error",
+            "stage": "failed",
+            "code": "TASK_INTERRUPTED",
+            "message": USER_ERROR_MESSAGES["TASK_INTERRUPTED"],
+            "technical_message": f"TASK_INTERRUPTED: last stage was {payload.get('stage') or 'unknown'}",
+            "elapsed_seconds": int(payload.get("elapsed_seconds") or 0),
+            "progress_percent": int(payload.get("progress_percent") or 0),
+            "current": payload.get("current"),
+            "total": payload.get("total"),
+            "video_title": str(payload.get("video_title") or ""),
+            "video_url": str(payload.get("video_url") or ""),
+            "output_dir": str(payload.get("output_dir") or ""),
+        }
+    return None
 
 
 STAGE_MESSAGES = {
@@ -313,6 +351,10 @@ class NativeHost:
         self.job_thread: threading.Thread | None = None
         self.active_request_id = ""
         self.latest_request_id = ""
+        if self.persist_log:
+            recovered = interrupted_job_from_log(self.log_path)
+            if recovered:
+                self.send(recovered)
 
     def send(self, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")

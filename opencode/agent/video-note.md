@@ -1,5 +1,5 @@
 ---
-description: Execute the youtube-transcript v3.3.1 fixed video-to-note workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
+description: Execute the youtube-transcript v3.3.2 fixed video-to-note workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
 mode: primary
 permission:
   read: allow

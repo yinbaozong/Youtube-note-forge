@@ -40,6 +40,7 @@ from youtube_reader_host import (  # noqa: E402
     cookies_to_netscape,
     create_http_server,
     format_user_error,
+    interrupted_job_from_log,
     NativeHost,
     screenshot_directory,
     stage_from_output,
@@ -49,6 +50,34 @@ from youtube_reader_host import (  # noqa: E402
 
 
 class NativeHostContractTests(unittest.TestCase):
+    def test_unfinished_logged_job_is_recovered_as_interrupted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            log = Path(raw) / "last-job.jsonl"
+            log.write_text(
+                json.dumps(
+                    {
+                        "type": "progress",
+                        "request_id": "stale-request",
+                        "status": "running",
+                        "stage": "writing",
+                        "message": "正在写作",
+                        "elapsed_seconds": 394,
+                        "progress_percent": 76,
+                        "video_title": "测试视频",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            recovered = interrupted_job_from_log(log)
+        self.assertIsNotNone(recovered)
+        assert recovered is not None
+        self.assertEqual(recovered["type"], "error")
+        self.assertEqual(recovered["code"], "TASK_INTERRUPTED")
+        self.assertEqual(recovered["request_id"], "stale-request")
+        self.assertEqual(recovered["video_title"], "测试视频")
+
     def test_only_youtube_video_urls_are_accepted(self) -> None:
         self.assertEqual(validate_youtube_url("https://www.youtube.com/watch?v=XWlz2zfBL7E"), "XWlz2zfBL7E")
         self.assertEqual(validate_youtube_url("https://youtu.be/XWlz2zfBL7E"), "XWlz2zfBL7E")
@@ -305,7 +334,7 @@ class QualityGateV31Tests(unittest.TestCase):
             vault = Path(raw)
             note = vault / "中文标题 - English Title.md"
             note.write_text(
-                "---\nskill_version: 3.3.1\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
+                "---\nskill_version: 3.3.2\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
                 "## 一句话摘要\n\n这是摘要。\n\n"
                 "## 核心知识点速览\n\n- 知识点。\n\n"
                 "## 详细内容总结\n\n### 第一部分\n\n内容很少。\n\n"
@@ -394,6 +423,7 @@ class ExtensionStaticContractTests(unittest.TestCase):
 
     def test_installer_runs_and_verifies_local_companion(self) -> None:
         installer = (ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        restarter = (ROOT / "scripts" / "restart_companion.ps1").read_text(encoding="utf-8")
         verifier = (ROOT / "scripts" / "verify_install.ps1").read_text(encoding="utf-8")
         self.assertNotIn("PyInstaller", installer)
         self.assertIn("pythonw.exe", installer)
@@ -405,6 +435,15 @@ class ExtensionStaticContractTests(unittest.TestCase):
         self.assertIn("runtime.json", verifier)
         self.assertIn("/health", verifier)
         self.assertTrue((ROOT / "scripts" / "restart_companion.ps1").is_file())
+        for script in (installer, restarter):
+            self.assertIn("/active", script)
+            self.assertIn("ACTIVE_JOB_RUNNING", script)
+            self.assertIn("[switch]$Force", script)
+
+    def test_disappeared_active_request_becomes_an_interrupted_error(self) -> None:
+        worker = (ROOT / "extension" / "service_worker.js").read_text(encoding="utf-8")
+        self.assertIn("TASK_INTERRUPTED", worker)
+        self.assertIn("活动任务已经中断", worker)
 
     def test_video_note_agent_runs_directly_and_reports_machine_result(self) -> None:
         agent = (ROOT / "opencode" / "agent" / "video-note.md").read_text(encoding="utf-8")
