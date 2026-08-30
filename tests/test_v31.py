@@ -26,6 +26,7 @@ from extract_frames import (  # noqa: E402
     extract_hls_frame,
     extract_hls_frames_parallel,
     load_hls_segments,
+    manifest_name_for_plan,
     parse_hls_media_playlist,
     resolve_ffmpeg,
     select_hls_segment,
@@ -40,7 +41,9 @@ from youtube_reader_host import (  # noqa: E402
     create_http_server,
     format_user_error,
     NativeHost,
+    screenshot_directory,
     stage_from_output,
+    validation_error_action,
     validate_youtube_url,
 )
 
@@ -89,8 +92,29 @@ class NativeHostContractTests(unittest.TestCase):
         self.assertEqual(message, "当前 YouTube Cookie 已失效。请保持 YouTube 登录状态并重新点击插件，插件会自动更新 Cookie。")
         self.assertNotIn("yt-dlp", message)
 
+    def test_first_note_validation_failure_gets_one_repair_only(self) -> None:
+        result = {"status": "error", "code": "NOTE_VALIDATION_FAILED"}
+        self.assertEqual(validation_error_action(result, failures_seen=0), "repair")
+        self.assertEqual(validation_error_action(result, failures_seen=1), "fail")
+        self.assertEqual(validation_error_action({"status": "error", "code": "COOKIE_REJECTED"}, failures_seen=0), "fail")
+
+    def test_screenshot_directory_is_derived_from_frame_results(self) -> None:
+        result = {
+            "manifest": r"C:\Vault\YouTube video\assets\abc\frame-manifest.json",
+            "screenshots": [{"path": r"C:\Vault\YouTube video\assets\abc\frame_01.jpg"}],
+        }
+        self.assertEqual(screenshot_directory(result), r"C:\Vault\YouTube video\assets\abc")
+
 
 class FrameV31Tests(unittest.TestCase):
+    def test_each_distinct_frame_plan_gets_an_immutable_manifest_name(self) -> None:
+        first = [FrameRequest("section", 10.0, "展示结构", True)]
+        second = [FrameRequest("section", 20.0, "展示结果", True)]
+        first_name = manifest_name_for_plan(first, [{"title": "原理"}])
+        self.assertEqual(first_name, manifest_name_for_plan(first, [{"title": "原理"}]))
+        self.assertNotEqual(first_name, manifest_name_for_plan(second, [{"title": "原理"}]))
+        self.assertRegex(first_name, r"^frame-manifest-[0-9a-f]{12}\.json$")
+
     def test_hls_playlist_maps_timestamp_to_one_bounded_segment(self) -> None:
         playlist = """#EXTM3U
 #EXT-X-TARGETDURATION:8
@@ -281,7 +305,7 @@ class QualityGateV31Tests(unittest.TestCase):
             vault = Path(raw)
             note = vault / "中文标题 - English Title.md"
             note.write_text(
-                "---\nskill_version: 3.3.0\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
+                "---\nskill_version: 3.3.1\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
                 "## 一句话摘要\n\n这是摘要。\n\n"
                 "## 核心知识点速览\n\n- 知识点。\n\n"
                 "## 详细内容总结\n\n### 第一部分\n\n内容很少。\n\n"
@@ -320,11 +344,25 @@ class ExtensionStaticContractTests(unittest.TestCase):
         self.assertIn('id="progressText"', popup)
         self.assertIn('id="timeline"', popup)
         self.assertIn('id="copyPath"', popup)
+        self.assertIn('id="copyPhotosPath"', popup)
+        self.assertIn('id="retryConnection"', popup)
         self.assertIn("强制停止", popup)
         self.assertIn("文件位置", script)
+        self.assertIn("照片位置", script)
+        self.assertIn("正在处理", script)
+        self.assertIn("预计保存位置", script)
+        self.assertIn("清除任务", script)
         self.assertIn("总耗时", script)
         self.assertIn("progress_percent", script)
         self.assertIn("STAGE_ORDER", script)
+
+    def test_extension_has_a_visible_brand_logo_and_icons(self) -> None:
+        manifest = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
+        popup = (ROOT / "extension" / "popup.html").read_text(encoding="utf-8")
+        self.assertIn('class="brand-logo"', popup)
+        self.assertEqual(manifest["action"]["default_icon"]["32"], "icons/icon32.png")
+        for size in (16, 32, 48, 128):
+            self.assertTrue((ROOT / "extension" / "icons" / f"icon{size}.png").is_file())
 
     def test_background_state_uses_action_badges_and_survives_popup_closure(self) -> None:
         worker = (ROOT / "extension" / "service_worker.js").read_text(encoding="utf-8")
@@ -336,6 +374,16 @@ class ExtensionStaticContractTests(unittest.TestCase):
         self.assertIn("active_request_id", worker)
         self.assertIn('message.get("auto_open_note", True)', host)
         self.assertIn('"note_opened": note_opened', host)
+        self.assertIn("video_title", worker)
+        self.assertIn("output_dir", worker)
+        self.assertIn('"video_title": video_title', host)
+
+    def test_terminal_error_can_be_cleared_without_stale_task_context(self) -> None:
+        worker = (ROOT / "extension" / "service_worker.js").read_text(encoding="utf-8")
+        self.assertIn('status: "idle"', worker)
+        self.assertIn('message: "准备就绪，可以开始新任务"', worker)
+        self.assertIn('video_title: ""', worker)
+        self.assertIn('request_id: ""', worker)
 
     def test_model_picker_is_searchable_and_has_manual_fallback(self) -> None:
         options_html = (ROOT / "extension" / "options.html").read_text(encoding="utf-8")
@@ -347,12 +395,16 @@ class ExtensionStaticContractTests(unittest.TestCase):
     def test_installer_runs_and_verifies_local_companion(self) -> None:
         installer = (ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
         verifier = (ROOT / "scripts" / "verify_install.ps1").read_text(encoding="utf-8")
-        self.assertIn("PyInstaller", installer)
-        self.assertIn("youtube-reader-host.exe", installer)
+        self.assertNotIn("PyInstaller", installer)
+        self.assertIn("pythonw.exe", installer)
+        self.assertIn("youtube_reader_host.py", installer)
+        self.assertIn("runtime.json", installer)
         self.assertIn("CurrentVersion\\Run", installer)
         self.assertIn("--serve", installer)
         self.assertIn("Wait-Process", installer)
+        self.assertIn("runtime.json", verifier)
         self.assertIn("/health", verifier)
+        self.assertTrue((ROOT / "scripts" / "restart_companion.ps1").is_file())
 
     def test_video_note_agent_runs_directly_and_reports_machine_result(self) -> None:
         agent = (ROOT / "opencode" / "agent" / "video-note.md").read_text(encoding="utf-8")
@@ -360,6 +412,8 @@ class ExtensionStaticContractTests(unittest.TestCase):
         self.assertIn("mode: primary", agent)
         self.assertIn("PIPELINE_RESULT=", agent)
         self.assertIn("PIPELINE_RESULT=", command)
+        self.assertIn("第一次 NOTE_VALIDATION_FAILED", agent)
+        self.assertIn("第一次 NOTE_VALIDATION_FAILED", command)
 
     def test_stage_detection_exposes_real_pipeline_phases(self) -> None:
         self.assertEqual(stage_from_output("extract_transcript.py"), "materials")
@@ -395,6 +449,18 @@ class CompanionHttpTests(unittest.TestCase):
         self.assertEqual(payload["type"], "cancelled")
         self.assertEqual(payload["status"], "cancelled")
         run.assert_called_once()
+
+    @mock.patch("youtube_reader_host.subprocess.run")
+    def test_force_stop_waits_for_old_job_before_allowing_a_new_one(self, _run: mock.Mock) -> None:
+        host = NativeHost(native_output=False, persist_log=False)
+        host.active_request_id = "request-1"
+        host.process = mock.Mock()
+        host.process.poll.return_value = None
+        host.job_thread = mock.Mock()
+        host.job_thread.is_alive.return_value = False
+        host.handle({"type": "cancel_job", "request_id": "request-1"})
+        host.job_thread.join.assert_called_once_with(timeout=5)
+        self.assertEqual(host.active_request_id, "")
 
     def test_second_start_attaches_to_the_existing_job(self) -> None:
         host = NativeHost(native_output=False, persist_log=False)

@@ -12,7 +12,11 @@ let state = {
   elapsed_seconds: 0,
   progress_percent: 0,
   note_path: "",
-  screenshot_count: 0
+  screenshot_count: 0,
+  screenshot_dir: "",
+  video_title: "",
+  video_url: "",
+  output_dir: ""
 };
 let pollTimer = null;
 let activePoll = null;
@@ -54,7 +58,7 @@ async function companionFetch(path, options = {}) {
   try {
     response = await fetch(COMPANION_BASE + path, options);
   } catch (_error) {
-    throw new Error("本地桌面伴侣未启动，请重新运行 install.ps1");
+    throw new Error("本地桌面伴侣未启动。请运行项目 scripts\\restart_companion.ps1；若尚未安装，请运行 scripts\\install.ps1。安装文件位于 %LOCALAPPDATA%\\YouTubeNoteReader\\youtube_reader_host.py。");
   }
   let payload = {};
   try {
@@ -106,6 +110,10 @@ function statusPatch(message) {
     current: message.current ?? state.current,
     total: message.total ?? state.total
   };
+  for (const key of ["video_title", "video_url", "output_dir"]) {
+    if (message[key]) patch[key] = message[key];
+  }
+  if (message.screenshot_dir) patch.screenshot_dir = message.screenshot_dir;
   if (message.type === "attached" && message.active_request_id) {
     patch.request_id = message.active_request_id;
     patch.status = "running";
@@ -114,6 +122,7 @@ function statusPatch(message) {
     patch.status = "ok";
     patch.note_path = message.note_path || "";
     patch.screenshot_count = message.screenshot_count || 0;
+    patch.screenshot_dir = message.screenshot_dir || state.screenshot_dir || "";
     patch.message = message.note_opened
       ? "学习笔记已生成，已在 Obsidian 打开"
       : "学习笔记已生成并通过校验";
@@ -121,6 +130,8 @@ function statusPatch(message) {
     patch.auto_opened = Boolean(message.note_opened);
   } else if (message.type === "error") {
     patch.status = "error";
+    patch.current = message.current || 0;
+    patch.total = message.total || 0;
   } else if (message.type === "cancelled") {
     patch.status = "cancelled";
   }
@@ -161,7 +172,13 @@ async function startJob() {
     startPolling();
     return state;
   }
-  const active = await companionActive();
+  let active;
+  try {
+    active = await companionActive();
+  } catch (error) {
+    await updateState({ status: "error", stage: "failed", message: error.message });
+    throw error;
+  }
   if (active.status === "running" && active.request_id) {
     await updateState(statusPatch(active));
     await updateState({ request_id: active.request_id });
@@ -175,6 +192,11 @@ async function startJob() {
   const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
   if (!cookies.length) throw new Error("没有读取到 YouTube Cookie，请先登录 YouTube");
   const requestId = crypto.randomUUID();
+  const videoTitle = (tab.title || "当前 YouTube 视频")
+    .replace(/^\(\d+\)\s*/, "")
+    .replace(/\s+-\s+YouTube$/, "")
+    .trim();
+  const outputDir = settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video";
   await updateState({
     status: "running",
     stage: "credentials",
@@ -185,6 +207,10 @@ async function startJob() {
     total: 0,
     note_path: "",
     screenshot_count: 0,
+    screenshot_dir: "",
+    video_title: videoTitle,
+    video_url: tab.url,
+    output_dir: outputDir,
     auto_opened: false,
     request_id: requestId
   });
@@ -193,6 +219,7 @@ async function startJob() {
       type: "start_job",
       request_id: requestId,
       url: tab.url,
+      video_title: videoTitle,
       model: settings.model,
       vault: settings.vault,
       auto_open_note: settings.auto_open_note,
@@ -211,11 +238,37 @@ async function startJob() {
 }
 
 async function cancelJob() {
-  if (state.status === "running" && state.request_id) {
+  const wasRunning = state.status === "running";
+  if (wasRunning && state.request_id) {
     await companionRequest({ type: "cancel_job", request_id: state.request_id });
   }
   stopPolling();
-  await updateState({ status: "cancelled", stage: "cancelled", message: "任务已强制停止" });
+  if (wasRunning) {
+    await updateState({
+      status: "cancelled",
+      stage: "cancelled",
+      message: "任务已强制停止",
+      current: 0,
+      total: 0
+    });
+    return;
+  }
+  await updateState({
+    status: "idle",
+    stage: "idle",
+    message: "准备就绪，可以开始新任务",
+    elapsed_seconds: 0,
+    progress_percent: 0,
+    current: 0,
+    total: 0,
+    note_path: "",
+    screenshot_count: 0,
+    screenshot_dir: "",
+    video_title: "",
+    video_url: "",
+    output_dir: "",
+    request_id: ""
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -254,6 +307,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "start_job") return await startJob();
     if (message.type === "cancel_job") {
       await cancelJob();
+      return state;
+    }
+    if (message.type === "retry_connection") {
+      try {
+        await companionHealth();
+        await updateState({ status: "idle", stage: "idle", message: "桌面伴侣已连接，可以开始新任务", elapsed_seconds: 0, progress_percent: 0 });
+      } catch (error) {
+        await updateState({ status: "error", stage: "failed", message: error.message });
+      }
       return state;
     }
     if (message.type === "list_models") {

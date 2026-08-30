@@ -103,6 +103,17 @@ def detailed_chapters(details: str) -> list[tuple[str, str]]:
     return chapters
 
 
+def embedded_images(details: str) -> list[tuple[str, int]]:
+    """Return Obsidian wiki embeds and standard Markdown image targets."""
+    found: list[tuple[int, str, int]] = []
+    for match in re.finditer(r"!\[\[([^\]]+)\]\]", details):
+        found.append((match.start(), match.group(1).strip(), match.end()))
+    for match in re.finditer(r"!\[[^\]]*\]\((?:<([^>]+)>|([^\n)]+))\)", details):
+        target = (match.group(1) or match.group(2) or "").strip()
+        found.append((match.start(), target, match.end()))
+    return [(target, end) for _, target, end in sorted(found)]
+
+
 def load_frame_manifest(frontmatter: str, note: Path, vault: Path) -> tuple[dict, Path | None, list[dict[str, str]]]:
     errors: list[dict[str, str]] = []
     raw = frontmatter_value(frontmatter, "frame_manifest")
@@ -148,7 +159,7 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
         if re.search(rf"^## {re.escape(name)}\s*$", body, flags=re.MULTILINE):
             errors.append({"code": "SCAFFOLD_SECTION_PRESENT", "message": f"终稿必须删除脚手架章节：{name}。"})
     details = section_body(body, "详细内容总结")
-    images = list(re.finditer(r"!\[\[([^\]]+)\]\]", details))
+    images = embedded_images(details)
     manifest, _, manifest_errors = load_frame_manifest(frontmatter, note, vault)
     errors.extend(manifest_errors)
     manifest_frames: dict[Path, dict] = {}
@@ -161,20 +172,20 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
     if not images:
         errors.append({"code": "DETAIL_IMAGES_MISSING", "message": "详细内容总结必须包含对应截图。"})
     embedded: list[Path] = []
-    for image in images:
-        target = resolve_obsidian_target(image.group(1), note, vault)
+    for image_target, image_end in images:
+        target = resolve_obsidian_target(image_target, note, vault)
         if not target:
-            errors.append({"code": "IMAGE_LINK_BROKEN", "message": f"截图链接无效：{image.group(1)}"})
+            errors.append({"code": "IMAGE_LINK_BROKEN", "message": f"截图链接无效：{image_target}"})
         else:
             resolved = target.resolve()
             embedded.append(resolved)
             if target.name.lower().startswith("cover"):
-                errors.append({"code": "COVER_USED_AS_FRAME", "message": f"封面不能替代正文关键帧：{image.group(1)}"})
+                errors.append({"code": "COVER_USED_AS_FRAME", "message": f"封面不能替代正文关键帧：{image_target}"})
             elif resolved not in manifest_frames:
-                errors.append({"code": "IMAGE_NOT_IN_MANIFEST", "message": f"正文图片不在成功抽帧清单中：{image.group(1)}"})
-        nearby = details[image.end() : image.end() + 240]
+                errors.append({"code": "IMAGE_NOT_IN_MANIFEST", "message": f"正文图片不在成功抽帧清单中：{image_target}"})
+        nearby = details[image_end : image_end + 240]
         if len(re.findall(r"[\u3400-\u9fff]", nearby)) < 8:
-            errors.append({"code": "IMAGE_CAPTION_MISSING", "message": f"截图缺少中文说明：{image.group(1)}"})
+            errors.append({"code": "IMAGE_CAPTION_MISSING", "message": f"截图缺少中文说明：{image_target}"})
     if len(embedded) != len(set(embedded)):
         errors.append({"code": "DUPLICATE_IMAGE_EMBED", "message": "详细内容总结重复嵌入了同一张图片。"})
     embedded_set = set(embedded)

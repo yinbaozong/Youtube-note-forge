@@ -15,6 +15,8 @@ header, footer {
   border-bottom: 1px solid #dde1e7;
 }
 footer { border-top: 1px solid #dde1e7; border-bottom: 0; gap: 8px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; }
+.brand-logo { width: 28px; height: 28px; object-fit: contain; }
 main { min-height: 120px; padding: 18px 16px; }
 .icon { width: 32px; height: 32px; padding: 0; border: 0; background: transparent; font-size: 18px; }
 .status-line { display: flex; align-items: center; gap: 8px; font-weight: 600; }
@@ -22,7 +24,8 @@ main { min-height: 120px; padding: 18px 16px; }
 #indicator.running { background: #d99a00; }
 #indicator.ok { background: #198754; }
 #indicator.error { background: #c73535; }
-#stage, #result { margin-top: 10px; color: #596574; overflow-wrap: anywhere; }
+#stage, #taskInfo, #result { margin-top: 10px; color: #596574; overflow-wrap: anywhere; }
+#taskInfo { padding: 9px 10px; border-left: 3px solid #1976d2; background: #fff; white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
 #result { white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
 .progress-row { display: grid; grid-template-columns: 1fr 38px; align-items: center; gap: 10px; margin-top: 16px; }
 progress { width: 100%; height: 8px; accent-color: #1976d2; }

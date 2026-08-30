@@ -6,11 +6,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Net.Http
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $extensionRoot = Join-Path $sourceRoot 'extension'
 $hostSource = Join-Path $sourceRoot 'native_host\youtube_reader_host.py'
 $installRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
-$hostTarget = Join-Path $installRoot 'youtube-reader-host.exe'
+$hostTarget = Join-Path $installRoot 'youtube_reader_host.py'
+$runtimePath = Join-Path $installRoot 'runtime.json'
 $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'YouTubeNoteReader'
 $legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host'
@@ -56,64 +58,38 @@ if (-not $SkipDependencies -and $PSCmdlet.ShouldProcess('Python environment', 'I
     if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
 }
 
-& $Python -c 'import PyInstaller' 2>$null
-if ($LASTEXITCODE -ne 0) {
-    if ($SkipDependencies) { throw 'PyInstaller is required to build the desktop companion.' }
-    & $Python -m pip install 'pyinstaller>=6.20,<7'
-    if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
-}
+$pythonwCandidate = Join-Path (Split-Path -Parent $Python) 'pythonw.exe'
+$launcher = if (Test-Path -LiteralPath $pythonwCandidate -PathType Leaf) { $pythonwCandidate } else { $Python }
 
 if ($PSCmdlet.ShouldProcess($installRoot, 'Install YouTube Reader desktop companion')) {
     New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
-    $buildRoot = Join-Path $env:TEMP "youtube-reader-host-build-$PID"
-    $distRoot = Join-Path $buildRoot 'dist'
-    try {
-        New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
-        & $Python -m PyInstaller --noconfirm --clean --onefile --log-level WARN `
-            --name youtube-reader-host --distpath $distRoot --workpath (Join-Path $buildRoot 'work') `
-            --specpath $buildRoot $hostSource
-        if ($LASTEXITCODE -ne 0) { throw 'Desktop companion executable build failed.' }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            ($_.CommandLine -and $_.CommandLine.IndexOf($hostTarget, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+            ($_.ExecutablePath -and $_.ExecutablePath.EndsWith('youtube-reader-host.exe', [StringComparison]::OrdinalIgnoreCase))
+        } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+        }
 
-        $installedHost = [IO.Path]::GetFullPath($hostTarget)
-        Get-Process -Name 'youtube-reader-host' -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -and [IO.Path]::GetFullPath($_.Path) -eq $installedHost } |
-            ForEach-Object {
-                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-                Wait-Process -Id $_.Id -Timeout 10 -ErrorAction SilentlyContinue
-            }
-        $builtHost = Join-Path $distRoot 'youtube-reader-host.exe'
-        $copied = $false
-        for ($attempt = 0; $attempt -lt 20; $attempt++) {
-            try {
-                Copy-Item -LiteralPath $builtHost -Destination $hostTarget -Force
-                $copied = $true
-                break
-            } catch [IO.IOException] {
-                Start-Sleep -Milliseconds 250
-            }
-        }
-        if (-not $copied) { throw "Desktop companion executable remained locked: $hostTarget" }
-    } finally {
-        if (Test-Path -LiteralPath $buildRoot) {
-            $fullBuild = [IO.Path]::GetFullPath($buildRoot)
-            $fullTemp = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
-            if (-not $fullBuild.StartsWith($fullTemp, [StringComparison]::OrdinalIgnoreCase)) {
-                throw "Refusing to remove unexpected build directory: $fullBuild"
-            }
-            Remove-Item -LiteralPath $fullBuild -Recurse -Force
-        }
-    }
+    Copy-Item -LiteralPath $hostSource -Destination $hostTarget -Force
+    @{
+        python = [IO.Path]::GetFullPath($Python)
+        launcher = [IO.Path]::GetFullPath($launcher)
+        host = [IO.Path]::GetFullPath($hostTarget)
+    } | ConvertTo-Json | Set-Content -LiteralPath $runtimePath -Encoding UTF8
 
     if (Test-Path $legacyRegistryPath) { Remove-Item -LiteralPath $legacyRegistryPath -Recurse -Force }
-    foreach ($legacy in @('com.youtube_note_reader.host.json', 'youtube-reader-host.cmd', 'youtube_reader_host.py')) {
+    foreach ($legacy in @('com.youtube_note_reader.host.json', 'youtube-reader-host.cmd', 'youtube-reader-host.exe')) {
         $legacyPath = Join-Path $installRoot $legacy
         if (Test-Path -LiteralPath $legacyPath) { Remove-Item -LiteralPath $legacyPath -Force }
     }
 
     New-Item -Path $runPath -Force | Out-Null
-    $runCommand = '"' + $hostTarget + '" --serve'
+    $runCommand = '"' + $launcher + '" "' + $hostTarget + '" --serve'
     New-ItemProperty -Path $runPath -Name $runName -Value $runCommand -PropertyType String -Force | Out-Null
-    Start-Process -FilePath $hostTarget -ArgumentList '--serve' -WindowStyle Hidden
+    Start-Process -FilePath $launcher -ArgumentList @($hostTarget, '--serve') -WindowStyle Hidden
 }
 
 $expectedVersion = (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $sourceRoot 'VERSION')).Trim()

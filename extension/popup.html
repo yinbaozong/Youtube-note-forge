@@ -8,12 +8,16 @@
   </head>
   <body>
     <header>
-      <strong>YouTube 阅读器</strong>
+      <div class="brand">
+        <img class="brand-logo" src="icons/icon32.png" alt="">
+        <strong>YouTube 阅读器</strong>
+      </div>
       <button id="settings" class="icon" title="设置" aria-label="设置">⚙</button>
     </header>
     <main>
       <div class="status-line"><span id="indicator"></span><span id="status">准备就绪</span></div>
       <div id="stage">等待任务</div>
+      <div id="taskInfo" hidden></div>
       <div class="progress-row">
         <progress id="progress" max="100" value="0"></progress>
         <span id="progressText">0%</span>
@@ -34,6 +38,8 @@
       <button id="cancel" class="danger" hidden>强制停止</button>
       <button id="openNote" class="secondary" hidden>在 Obsidian 打开</button>
       <button id="copyPath" class="secondary" hidden>复制路径</button>
+      <button id="copyPhotosPath" class="secondary" hidden>复制照片路径</button>
+      <button id="retryConnection" class="secondary" hidden>重试连接</button>
       <button id="settingsFooter" class="secondary">设置模型</button>
     </footer>
     <script src="popup.js"></script>

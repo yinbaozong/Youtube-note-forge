@@ -1,5 +1,5 @@
 ---
-description: Execute the youtube-transcript v3.3.0 fixed video-to-note workflow. Never skip transcript-guided frame extraction; stop on the first script failure.
+description: Execute the youtube-transcript v3.3.1 fixed video-to-note workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
 mode: primary
 permission:
   read: allow
@@ -22,4 +22,4 @@ For each URL, use this exact command order: `extract_transcript.py` once, `extra
 
 For `--version`, run `python .obsidian/skills/youtube-transcript/scripts/video_note.py --version` and return its real output.
 
-Your final response must end with the exact final machine line from the last script, in this form: `PIPELINE_RESULT=<JSON>`. Copy that line verbatim. Do not translate, summarize, re-encode, or omit it. On failure, return the failing script's exact `PIPELINE_RESULT` line and stop. On success, return the final `validate_note.py` `PIPELINE_RESULT` line.
+Your final response must end with the exact final machine line from the last script, in this form: `PIPELINE_RESULT=<JSON>`. Copy that line verbatim. Do not translate, summarize, re-encode, or omit it. Extraction or frame errors are terminal. 第一次 NOTE_VALIDATION_FAILED is not terminal: use its error list to repair the current note only, then run `validate_note.py` exactly one more time. A second validation failure is terminal. On success, return the final `validate_note.py` `PIPELINE_RESULT` line.

@@ -3,14 +3,14 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $installRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
-$hostTarget = Join-Path $installRoot 'youtube-reader-host.exe'
+$hostTarget = Join-Path $installRoot 'youtube_reader_host.py'
 $legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host'
 $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'YouTubeNoteReader'
 
 if ($PSCmdlet.ShouldProcess($hostTarget, 'Stop YouTube Reader desktop companion')) {
-    Get-CimInstance Win32_Process -Filter "Name='youtube-reader-host.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath -eq $hostTarget } |
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($hostTarget, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 if (Test-Path $legacyRegistryPath) {

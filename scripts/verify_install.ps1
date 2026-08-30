@@ -4,10 +4,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Net.Http
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $expectedVersion = (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $sourceRoot 'VERSION')).Trim()
 $installRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
-$hostTarget = Join-Path $installRoot 'youtube-reader-host.exe'
+$hostTarget = Join-Path $installRoot 'youtube_reader_host.py'
+$runtimePath = Join-Path $installRoot 'runtime.json'
 $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'YouTubeNoteReader'
 $legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host'
@@ -15,14 +17,23 @@ $legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.you
 foreach ($path in @(
     (Join-Path $sourceRoot 'extension\manifest.json'),
     $hostTarget,
+    $runtimePath,
     (Join-Path $Vault '.obsidian\skills\youtube-transcript\VERSION'),
     'C:\Users\win11\.config\opencode\skills\youtube-transcript\VERSION'
 )) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing installation file: $path" }
 }
 
+$runtime = Get-Content -Raw -Encoding UTF8 -LiteralPath $runtimePath | ConvertFrom-Json
+foreach ($path in @($runtime.python, $runtime.launcher, $runtime.host)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing companion runtime path: $path" }
+}
+$sourceHostHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sourceRoot 'native_host\youtube_reader_host.py')).Hash
+$installedHostHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostTarget).Hash
+if ($sourceHostHash -ne $installedHostHash) { throw 'Installed desktop companion source hash does not match the repository.' }
+
 $runCommand = (Get-ItemProperty -Path $runPath -Name $runName -ErrorAction Stop).$runName
-if ($runCommand -ne ('"' + $hostTarget + '" --serve')) { throw 'Desktop companion startup registration is incorrect.' }
+if ($runCommand -ne ('"' + $runtime.launcher + '" "' + $hostTarget + '" --serve')) { throw 'Desktop companion startup registration is incorrect.' }
 if (Test-Path $legacyRegistryPath) { throw 'Legacy Chrome Native Messaging registration is still present.' }
 
 $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $sourceRoot 'extension\manifest.json') | ConvertFrom-Json
@@ -38,7 +49,7 @@ foreach ($versionPath in @(
     if ($actual -ne $expectedVersion) { throw "Skill version mismatch at ${versionPath}: $actual != $expectedVersion" }
 }
 
-& $hostTarget --self-test
+& $runtime.python $hostTarget --self-test
 if ($LASTEXITCODE -ne 0) { throw 'Desktop companion self-test failed.' }
 
 $handler = [Net.Http.HttpClientHandler]::new()

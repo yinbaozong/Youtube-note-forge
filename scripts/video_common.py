@@ -81,12 +81,21 @@ def emit_progress(
 def emit_result(status: str, **fields: Any) -> None:
     payload = {"status": status, "skill": SKILL_NAME, "skill_version": VERSION, **fields}
     if status == "error":
-        emit_progress(
-            "failed",
-            str(fields.get("message") or fields.get("code") or "任务失败。"),
-            percent=int(fields.get("percent") or 0),
-            code=str(fields.get("code") or "PIPELINE_FAILED"),
-        )
+        code = str(fields.get("code") or "PIPELINE_FAILED")
+        if code == "NOTE_VALIDATION_FAILED":
+            emit_progress(
+                "validation",
+                "首次质量校验未通过，正在进行唯一一次笔记修正。",
+                percent=92,
+                code=code,
+            )
+        else:
+            emit_progress(
+                "failed",
+                str(fields.get("message") or code),
+                percent=int(fields.get("percent") or 0),
+                code=code,
+            )
     # Keep the machine-readable contract ASCII so Windows consoles using GBK
     # cannot corrupt an error payload that an agent must parse.
     line = "PIPELINE_RESULT=" + json.dumps(payload, ensure_ascii=True, sort_keys=True)

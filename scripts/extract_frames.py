@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -57,6 +58,23 @@ class HlsSegment:
     start: float
     duration: float
     url: str
+
+
+def manifest_name_for_plan(plan: list[FrameRequest], article_outline: list[dict]) -> str:
+    payload = {
+        "article_outline": article_outline,
+        "frames": [
+            {
+                "section_id": item.section_id,
+                "timestamp": round(item.timestamp, 3),
+                "purpose": item.purpose,
+                "required": item.required,
+            }
+            for item in plan
+        ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"frame-manifest-{hashlib.sha256(encoded).hexdigest()[:12]}.json"
 
 
 def parse_timestamp(value: object) -> float:
@@ -647,7 +665,9 @@ def main(argv: list[str] | None = None) -> int:
         message = f"定点抽帧未达标：成功 {len(successful)}/{len(plan)}，必需图片失败 {len(required_failures)} 张。"
         emit_result("error", stage="frames", code=code, message=message, successful=successful, failures=failures, coverage=coverage)
         return 2
-    manifest = assets_dir / "frame-manifest.json"
+    # A plan-specific manifest keeps an older finished note valid when the same
+    # video is analyzed again with a different set of timestamps.
+    manifest = assets_dir / manifest_name_for_plan(plan, article_outline)
     manifest_payload = {
         "status": "ok",
         "skill_version": VERSION,

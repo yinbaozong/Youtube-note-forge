@@ -1676,6 +1676,7 @@ def main(argv: list[str] | None = None) -> int:
             "ok",
             stage="materials",
             url=args.url,
+            title=title,
             note=str(output_file),
             transcript=str(transcript_file),
             cover=str(cover_path) if cover_path else None,

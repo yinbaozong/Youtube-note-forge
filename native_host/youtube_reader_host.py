@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 HOST_NAME = "com.youtube_note_reader.host"
-HOST_VERSION = "3.3.0"
+HOST_VERSION = "3.3.1"
 DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault"
 COOKIE_PATH = Path.home() / ".config" / "opencode" / "credentials" / "youtube-transcript" / "cookies.youtube.txt"
 AUTH_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
@@ -249,6 +249,26 @@ def normalize_stage(stage: str) -> str:
     }.get(stage, stage)
 
 
+def validation_error_action(result: dict[str, Any], *, failures_seen: int) -> str:
+    if result.get("status") != "error":
+        return "continue"
+    if result.get("code") == "NOTE_VALIDATION_FAILED" and failures_seen == 0:
+        return "repair"
+    return "fail"
+
+
+def screenshot_directory(result: dict[str, Any]) -> str:
+    screenshots = result.get("screenshots")
+    if isinstance(screenshots, list):
+        for screenshot in screenshots:
+            if isinstance(screenshot, dict) and screenshot.get("path"):
+                return str(Path(str(screenshot["path"])).parent)
+            if isinstance(screenshot, str) and screenshot:
+                return str(Path(screenshot).parent)
+    manifest = str(result.get("manifest") or "")
+    return str(Path(manifest).parent) if manifest else ""
+
+
 def advance_stage(current: str, candidate: str) -> str:
     candidate = normalize_stage(candidate)
     if not candidate:
@@ -356,6 +376,9 @@ class NativeHost:
                             "progress_percent": active.get("progress_percent", 6),
                             "current": active.get("current"),
                             "total": active.get("total"),
+                            "video_title": active.get("video_title", ""),
+                            "video_url": active.get("video_url", ""),
+                            "output_dir": active.get("output_dir", ""),
                         }
                     )
                     return
@@ -374,11 +397,20 @@ class NativeHost:
                         "message": "任务已交给现有 /video-note Skill。",
                         "elapsed_seconds": 0,
                         "progress_percent": 2,
+                        "video_title": str(message.get("video_title") or "当前 YouTube 视频"),
+                        "video_url": str(message.get("url") or ""),
+                        "output_dir": str(Path(str(message.get("vault") or DEFAULT_VAULT)) / "YouTube video"),
                     }
                 )
             elif message_type == "cancel_job":
                 self.cancel_event.set()
                 self.stop_process()
+                job_thread = self.job_thread
+                if job_thread and job_thread is not threading.current_thread():
+                    job_thread.join(timeout=5)
+                    if job_thread.is_alive():
+                        raise RuntimeError("CANCEL_TIMEOUT: 旧任务未能在 5 秒内退出，请重启桌面伴侣。")
+                self.active_request_id = ""
                 self.send({"type": "cancelled", "request_id": request_id, "status": "cancelled"})
             else:
                 raise ValueError("不支持的 Native Host 消息。")
@@ -429,10 +461,16 @@ class NativeHost:
         started = time.monotonic()
         progress_path = self.log_path.parent / f"progress-{request_id}.jsonl"
         progress_path.unlink(missing_ok=True)
+        url = str(message.get("url") or "")
+        vault = Path(str(message.get("vault") or DEFAULT_VAULT)).expanduser()
+        video_title = str(message.get("video_title") or "当前 YouTube 视频")
+        task_context = {
+            "video_title": video_title,
+            "video_url": url,
+            "output_dir": str(vault / "YouTube video"),
+        }
         try:
-            url = str(message.get("url") or "")
             validate_youtube_url(url)
-            vault = Path(str(message.get("vault") or DEFAULT_VAULT)).expanduser()
             model = str(message.get("model") or "")
             cookie_count = save_cookie_snapshot(message.get("cookies") or [])
             executable = shutil.which("opencode") or "opencode"
@@ -446,6 +484,7 @@ class NativeHost:
                     "message": f"已保存 {cookie_count} 个 YouTube Cookie，正在启动现有 /video-note Skill。",
                     "elapsed_seconds": 0,
                     "progress_percent": 4,
+                    **task_context,
                 }
             )
             creationflags = 0
@@ -484,6 +523,8 @@ class NativeHost:
             final_result: dict[str, Any] = {}
             note_path = ""
             screenshot_count = 0
+            screenshot_dir = ""
+            validation_failures = 0
             stream_closed = False
             while not stream_closed or self.process.poll() is None:
                 elapsed = time.monotonic() - started
@@ -497,7 +538,11 @@ class NativeHost:
                     candidate = normalize_stage(str(event.get("stage") or ""))
                     if candidate == "failed":
                         code = str(event.get("code") or "PIPELINE_FAILED")
-                        raise RuntimeError(f"{code}: {event.get('message') or '任务失败。'}")
+                        if code == "NOTE_VALIDATION_FAILED" and validation_failures == 0:
+                            candidate = "validation"
+                            progress_message = "首次质量校验未通过，正在进行唯一一次笔记修正。"
+                        else:
+                            raise RuntimeError(f"{code}: {event.get('message') or '任务失败。'}")
                     stage = advance_stage(stage, candidate)
                     progress_percent = max(progress_percent, int(event.get("percent") or STAGE_PROGRESS.get(stage, 0)))
                     progress_message = str(event.get("message") or stage_message(stage))
@@ -518,8 +563,33 @@ class NativeHost:
                     progress_percent = max(progress_percent, STAGE_PROGRESS.get(stage, 0))
                     for result in pipeline_results(line):
                         final_result = result
+                        if result.get("title"):
+                            video_title = str(result["title"])
+                            task_context["video_title"] = video_title
                         result_stage = normalize_stage(str(result.get("stage") or stage))
                         if result.get("status") == "error":
+                            action = validation_error_action(result, failures_seen=validation_failures)
+                            if action == "repair":
+                                validation_failures += 1
+                                stage = advance_stage(stage, "validation")
+                                progress_percent = max(progress_percent, STAGE_PROGRESS["validation"])
+                                progress_message = "首次质量校验未通过，正在进行唯一一次笔记修正。"
+                                self.send(
+                                    {
+                                        "type": "pipeline_result",
+                                        "request_id": request_id,
+                                        "status": "running",
+                                        "stage": stage,
+                                        "result": result,
+                                        "message": progress_message,
+                                        "elapsed_seconds": int(elapsed),
+                                        "progress_percent": progress_percent,
+                                        "current": progress_current,
+                                        "total": progress_total,
+                                        **task_context,
+                                    }
+                                )
+                                continue
                             code = str(result.get("code") or "PIPELINE_FAILED")
                             raise RuntimeError(f"{code}: {result.get('message') or '任务失败。'}")
                         stage = advance_stage(stage, result_stage)
@@ -530,6 +600,7 @@ class NativeHost:
                             screenshot_count = max(screenshot_count, len(screenshots))
                         if isinstance(result.get("screenshot_count"), int):
                             screenshot_count = max(screenshot_count, int(result["screenshot_count"]))
+                        screenshot_dir = screenshot_directory(result) or screenshot_dir
                         self.send(
                             {
                                 "type": "pipeline_result",
@@ -542,6 +613,8 @@ class NativeHost:
                                 "progress_percent": progress_percent,
                                 "current": progress_current,
                                 "total": progress_total,
+                                "screenshot_dir": screenshot_dir,
+                                **task_context,
                             }
                         )
                 if elapsed - last_heartbeat >= 5:
@@ -557,6 +630,7 @@ class NativeHost:
                             "progress_percent": progress_percent,
                             "current": progress_current,
                             "total": progress_total,
+                            **task_context,
                         }
                     )
             returncode = self.process.wait(timeout=5)
@@ -584,8 +658,10 @@ class NativeHost:
                     "note_opened": note_opened,
                     "open_warning": open_warning,
                     "screenshot_count": screenshot_count,
+                    "screenshot_dir": screenshot_dir,
                     "elapsed_seconds": int(time.monotonic() - started),
                     "progress_percent": 100,
+                    **task_context,
                 }
             )
         except Exception as exc:
@@ -600,6 +676,9 @@ class NativeHost:
                         "message": "任务已强制停止。",
                         "elapsed_seconds": int(time.monotonic() - started),
                         "progress_percent": progress_percent if "progress_percent" in locals() else 0,
+                        "current": progress_current if "progress_current" in locals() else None,
+                        "total": progress_total if "progress_total" in locals() else None,
+                        **task_context,
                     }
                 )
             else:
@@ -615,6 +694,9 @@ class NativeHost:
                         "technical_message": str(exc),
                         "elapsed_seconds": int(time.monotonic() - started),
                         "progress_percent": progress_percent if "progress_percent" in locals() else 0,
+                        "current": progress_current if "progress_current" in locals() else None,
+                        "total": progress_total if "progress_total" in locals() else None,
+                        **task_context,
                     }
                 )
         finally:
