@@ -21,12 +21,12 @@ from video_note import version_report  # noqa: E402
 
 class V3ContractTests(unittest.TestCase):
     def test_version_is_single_source(self) -> None:
-        self.assertEqual(VERSION, "3.4.0")
-        self.assertEqual(version_text(), "youtube-transcript 3.4.0")
+        self.assertEqual(VERSION, "3.4.1")
+        self.assertEqual(version_text(), "youtube-transcript 3.4.1")
 
     def test_version_report_contains_core_hashes(self) -> None:
         report = version_report()
-        self.assertEqual(report["skill_version"], "3.4.0")
+        self.assertEqual(report["skill_version"], "3.4.1")
         self.assertIn("scripts/extract_frames.py", report["core_sha256"])
 
     def test_frame_plan_accepts_utf8_bom(self) -> None:

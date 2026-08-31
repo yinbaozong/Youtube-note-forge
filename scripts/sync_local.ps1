@@ -1,13 +1,15 @@
 [CmdletBinding()]
 param(
+    [string]$Vault = (Join-Path $HOME 'Documents\Obsidian Vault'),
+    [string]$OpenCodeRoot = (Join-Path $HOME '.config\opencode'),
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $destinations = @(
-    'C:\Users\win11\.config\opencode\skills\youtube-transcript',
-    'C:\Users\win11\Documents\Obsidian Vault\.obsidian\skills\youtube-transcript'
+    (Join-Path $OpenCodeRoot 'skills\youtube-transcript'),
+    (Join-Path $Vault '.obsidian\skills\youtube-transcript')
 )
 $files = @(
     'VERSION',
@@ -50,7 +52,7 @@ foreach ($destination in $destinations) {
     }
 }
 
-$globalRoot = 'C:\Users\win11\.config\opencode'
+$globalRoot = $OpenCodeRoot
 $agentTarget = Join-Path $globalRoot 'agent\video-note.md'
 $commandTarget = Join-Path $globalRoot 'command\video-note.md'
 if (-not $WhatIf) {

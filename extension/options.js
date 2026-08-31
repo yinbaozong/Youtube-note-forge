@@ -34,10 +34,18 @@ async function loadModels(savedModel = "") {
 async function load() {
   const settings = await chrome.storage.local.get({
     model: "",
-    vault: "C:\\Users\\win11\\Documents\\Obsidian Vault",
+    vault: "",
     auto_open_note: true
   });
-  vaultNode.value = settings.vault;
+  let vault = settings.vault;
+  if (!vault) {
+    const environment = await chrome.runtime.sendMessage({ type: "get_environment" });
+    if (environment?.default_vault) {
+      vault = environment.default_vault;
+      await chrome.storage.local.set({ vault });
+    }
+  }
+  vaultNode.value = vault;
   autoOpenNoteNode.checked = settings.auto_open_note !== false;
   modelNode.value = settings.model;
   await loadModels(settings.model);

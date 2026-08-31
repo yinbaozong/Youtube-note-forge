@@ -3,7 +3,7 @@ name: youtube-transcript
 description: Use for YouTube, Bilibili, and other video URLs when the user wants a Chinese Obsidian learning note with SRT subtitles, transcript-guided screenshots, and a fixed fail-fast workflow. Run the provided scripts only; never use browser automation, Chrome for Testing, Puppeteer, Canvas, or unbounded retries.
 ---
 
-# YouTube Transcript v3.4.0
+# YouTube Transcript v3.4.1
 
 Use this Skill as a strict state machine. Do not improvise alternate extraction paths.
 
@@ -35,14 +35,14 @@ python .obsidian/skills/youtube-transcript/scripts/extract_frames.py "<url>" --p
 ```
 
 4. Confirm that the frame result has `status: ok`, at least one screenshot, and a real `manifest` path. The script automatically writes `frame_manifest` into the note YAML. If any of these are missing, stop; do not write the final note and do not substitute the cover.
-5. Rename and rewrite the generated note in place according to [references/note-contract.md](references/note-contract.md). Under `## 详细内容总结`, use every `article_outline.title` as an exact `###` heading, explain its core claims, and insert every required successful frame into its matching chapter with a Chinese explanation. Only images listed in the manifest count as screenshots.
+5. Rename and rewrite the generated note in place according to [references/note-contract.md](references/note-contract.md). Under `## 详细内容总结`, use every `article_outline.title` as an exact `###` heading, explain its core claims, and insert every required successful frame into its matching chapter with a Chinese explanation. For vault-local screenshots, always use Obsidian wiki embeds such as `![[YouTube video/assets/VIDEO_ID/frame.jpg]]`; never use an unescaped Markdown target containing spaces. Only images listed in the manifest count as screenshots.
 6. Validate:
 
 ```powershell
 python .obsidian/skills/youtube-transcript/scripts/validate_note.py "<finished-note.md>"
 ```
 
-7. If validation fails, edit only that note once and run the validator once more. Never run extraction, write temporary scripts, inspect implementation code, or diagnose platform behavior during this repair. If it still fails, stop and report the returned errors.
+7. If validation fails, edit only that note once and run the validator once more. Never run extraction, write temporary scripts, inspect implementation code, or diagnose platform behavior during this repair. If it still fails, stop and report the returned errors. After a successful validation, the validator removes only `待命名 - ...` Markdown drafts in the same folder whose YAML `url` exactly matches the final note; unmatched interrupted drafts remain available for resume.
 
 ## Failure policy
 
@@ -66,7 +66,7 @@ ASR is disabled by default. Use `--allow-asr` only if the user explicitly accept
 ## Final note requirements
 
 - Filename: `中文标题 - English Title`.
-- YAML contains `skill_version: 3.4.0`, `quality_profile_version: 1`, and a valid `frame_manifest` written by `extract_frames.py`.
+- YAML contains `skill_version: 3.4.1`, `quality_profile_version: 1`, and a valid `frame_manifest` written by `extract_frames.py`.
 - Body begins at `## 一句话摘要` without a duplicate H1 title.
 - Remove source status, video description, visual-material indexes, extraction warnings, task instructions, and self-check sections from the final body; YAML already carries source metadata.
 - Use Chinese first; explain necessary English terminology at first use.

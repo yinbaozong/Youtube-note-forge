@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 HOST_NAME = "com.youtube_note_reader.host"
-HOST_VERSION = "3.4.0"
+HOST_VERSION = "3.4.1"
 DEFAULT_VAULT = Path.home() / "Documents" / "Obsidian Vault"
 COOKIE_PATH = Path.home() / ".config" / "opencode" / "credentials" / "youtube-transcript" / "cookies.youtube.txt"
 AUTH_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
@@ -819,7 +819,15 @@ class CompanionRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            self._send_json(200, {"status": "ok", "host": HOST_NAME, "version": HOST_VERSION})
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "host": HOST_NAME,
+                    "version": HOST_VERSION,
+                    "default_vault": str(DEFAULT_VAULT),
+                },
+            )
             return
         if not self._allowed_origin():
             self._send_json(403, {"type": "error", "message": "Extension origin is not allowed."})

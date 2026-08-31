@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Vault = 'C:\Users\win11\Documents\Obsidian Vault'
+    [string]$Vault = (Join-Path $HOME 'Documents\Obsidian Vault')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,13 +13,14 @@ $runtimePath = Join-Path $installRoot 'runtime.json'
 $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'YouTubeNoteReader'
 $legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host'
+$openCodeVersion = Join-Path $HOME '.config\opencode\skills\youtube-transcript\VERSION'
 
 foreach ($path in @(
     (Join-Path $sourceRoot 'extension\manifest.json'),
     $hostTarget,
     $runtimePath,
     (Join-Path $Vault '.obsidian\skills\youtube-transcript\VERSION'),
-    'C:\Users\win11\.config\opencode\skills\youtube-transcript\VERSION'
+    $openCodeVersion
 )) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing installation file: $path" }
 }
@@ -43,7 +44,7 @@ if ($manifest.host_permissions -notcontains 'http://127.0.0.1:32191/*') { throw 
 
 foreach ($versionPath in @(
     (Join-Path $Vault '.obsidian\skills\youtube-transcript\VERSION'),
-    'C:\Users\win11\.config\opencode\skills\youtube-transcript\VERSION'
+    $openCodeVersion
 )) {
     $actual = (Get-Content -Raw -Encoding UTF8 -LiteralPath $versionPath).Trim()
     if ($actual -ne $expectedVersion) { throw "Skill version mismatch at ${versionPath}: $actual != $expectedVersion" }

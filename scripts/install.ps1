@@ -1,6 +1,6 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$Vault = 'C:\Users\win11\Documents\Obsidian Vault',
+    [string]$Vault = (Join-Path $HOME 'Documents\Obsidian Vault'),
     [string]$Python = '',
     [switch]$SkipDependencies,
     [switch]$Force
@@ -69,9 +69,9 @@ if ($activeJob -and $activeJob.status -eq 'running' -and -not $Force) {
 }
 
 if ($WhatIfPreference) {
-    & (Join-Path $PSScriptRoot 'sync_local.ps1') -WhatIf
+    & (Join-Path $PSScriptRoot 'sync_local.ps1') -Vault $Vault -OpenCodeRoot (Join-Path $HOME '.config\opencode') -WhatIf
 } else {
-    & (Join-Path $PSScriptRoot 'sync_local.ps1')
+    & (Join-Path $PSScriptRoot 'sync_local.ps1') -Vault $Vault -OpenCodeRoot (Join-Path $HOME '.config\opencode')
 }
 
 if (-not $SkipDependencies -and $PSCmdlet.ShouldProcess('Python environment', 'Install youtube-transcript dependencies')) {

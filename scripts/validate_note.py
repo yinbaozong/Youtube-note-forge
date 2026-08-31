@@ -114,6 +114,43 @@ def embedded_images(details: str) -> list[tuple[str, int]]:
     return [(target, end) for _, target, end in sorted(found)]
 
 
+def unsafe_markdown_image_targets(details: str) -> list[str]:
+    """Find unescaped Markdown image paths that CommonMark truncates at spaces."""
+    unsafe: list[str] = []
+    for match in re.finditer(r"!\[[^\]]*\]\(([^<\n][^\n)]*)\)", details):
+        target = match.group(1).strip()
+        if re.search(r"\s", target):
+            unsafe.append(target)
+    return unsafe
+
+
+def cleanup_matching_drafts(note: Path) -> tuple[list[str], list[str]]:
+    """Delete only same-directory placeholder drafts with the exact final-note URL."""
+    removed: list[str] = []
+    warnings: list[str] = []
+    if note.stem.startswith("待命名 -"):
+        return removed, warnings
+    try:
+        final_frontmatter, _ = split_frontmatter(note.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return removed, [f"读取终稿以清理草稿时失败：{exc}"]
+    final_url = frontmatter_value(final_frontmatter, "url")
+    if not final_url:
+        return removed, warnings
+    for candidate in note.parent.glob("待命名 - *.md"):
+        if candidate.resolve() == note.resolve():
+            continue
+        try:
+            candidate_frontmatter, _ = split_frontmatter(candidate.read_text(encoding="utf-8"))
+            if frontmatter_value(candidate_frontmatter, "url") != final_url:
+                continue
+            candidate.unlink()
+            removed.append(str(candidate))
+        except OSError as exc:
+            warnings.append(f"无法删除同 URL 草稿 {candidate}：{exc}")
+    return removed, warnings
+
+
 def load_frame_manifest(frontmatter: str, note: Path, vault: Path) -> tuple[dict, Path | None, list[dict[str, str]]]:
     errors: list[dict[str, str]] = []
     raw = frontmatter_value(frontmatter, "frame_manifest")
@@ -159,6 +196,13 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
         if re.search(rf"^## {re.escape(name)}\s*$", body, flags=re.MULTILINE):
             errors.append({"code": "SCAFFOLD_SECTION_PRESENT", "message": f"终稿必须删除脚手架章节：{name}。"})
     details = section_body(body, "详细内容总结")
+    for unsafe_target in unsafe_markdown_image_targets(details):
+        errors.append(
+            {
+                "code": "MARKDOWN_IMAGE_PATH_UNSAFE",
+                "message": f"带空格的 Markdown 图片路径会被 Obsidian 截断，请改用 ![[路径]]：{unsafe_target}",
+            }
+        )
     images = embedded_images(details)
     manifest, _, manifest_errors = load_frame_manifest(frontmatter, note, vault)
     errors.extend(manifest_errors)
@@ -277,8 +321,15 @@ def main(argv: list[str] | None = None) -> int:
     if errors:
         emit_result("error", stage="note_validation", code="NOTE_VALIDATION_FAILED", note=str(args.note), errors=errors)
         return 2
-    emit_progress("validation", "质量校验通过，正在返回生成结果。", percent=98)
-    emit_result("ok", stage="note_validation", note=str(args.note))
+    emit_progress("validation", "质量校验通过，正在清理同 URL 的待命名草稿。", percent=98)
+    removed_drafts, cleanup_warnings = cleanup_matching_drafts(args.note)
+    emit_result(
+        "ok",
+        stage="note_validation",
+        note=str(args.note),
+        removed_drafts=removed_drafts,
+        cleanup_warnings=cleanup_warnings,
+    )
     return 0
 
 

@@ -1,7 +1,7 @@
 const COMPANION_BASE = "http://127.0.0.1:32191";
 const DEFAULT_SETTINGS = {
   model: "deepseek/deepseek-v4-pro",
-  vault: "C:\\Users\\win11\\Documents\\Obsidian Vault",
+  vault: "",
   auto_open_note: true
 };
 
@@ -210,7 +210,9 @@ async function startJob() {
     .replace(/^\(\d+\)\s*/, "")
     .replace(/\s+-\s+YouTube$/, "")
     .trim();
-  const outputDir = settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video";
+  const outputDir = settings.vault
+    ? settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video"
+    : "由桌面伴侣自动选择\\YouTube video";
   await updateState({
     status: "running",
     stage: "credentials",
@@ -274,7 +276,9 @@ async function resumeJob() {
     code: "",
     video_title: videoTitle,
     video_url: url,
-    output_dir: settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video",
+    output_dir: settings.vault
+      ? settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video"
+      : "由桌面伴侣自动选择\\YouTube video",
     request_id: requestId
   });
   try {
@@ -384,6 +388,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "list_models") {
       return await companionRequest({ type: "list_models", request_id: crypto.randomUUID() });
     }
+    if (message.type === "get_environment") return await companionHealth();
     if (message.type === "configure") {
       return await companionRequest({
         type: "configure",

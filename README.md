@@ -2,7 +2,7 @@
 
 Turn long videos into Obsidian-ready learning notes, with transcripts, SRT files, cover images, and useful screenshots.
 
-YouTube Note Forge v3.4.0 is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then use the fixed workflow to forge it into a structured Chinese note with transcript-guided visual evidence.
+YouTube Note Forge v3.4.1 is an agent skill for people who do serious learning from video. Paste a YouTube or Bilibili URL, let `yt-dlp` collect the reliable source material, then use the fixed workflow to forge it into a structured Chinese note with transcript-guided visual evidence.
 
 ![YouTube Note Forge workflow](docs/workflow.svg)
 
@@ -57,9 +57,20 @@ Chrome 当前视频页
 
 可选的本地 ASR 依赖在 `requirements-asr.txt`，默认关闭；只有用户明确允许 ASR 时才会下载音频。正常字幕与截图流程不会下载完整视频。远程定点截图失败时，只允许下载目标附近约 8 秒的临时片段，成功后立即删除。
 
+### 两种分享与安装方式
+
+GitHub Release 同时提供两个压缩包，朋友可按需求选择：
+
+| 方式 | 文件 | 适合场景 | 需要什么 |
+| --- | --- | --- | --- |
+| 仅 Skill | `youtube-transcript-skill-v3.4.1.zip` | 便携、熟悉 OpenCode 命令、愿意自行管理 Cookie | OpenCode、Python、FFmpeg、Node.js；把解压出的 `youtube-transcript` 放进 OpenCode Skill 目录 |
+| 完整阅读器 | `youtube-reader-full-v3.4.1.zip` | 追求稳定的一键操作、自动同步 Cookie、进度与恢复 | 上述依赖加 Chrome；运行安装脚本并加载扩展一次 |
+
+仅 Skill 方式不会安装浏览器扩展和桌面伴侣。将 `youtube-transcript` 文件夹放到 `%USERPROFILE%\.config\opencode\skills\`，再把仓库中的 `opencode\agent` 与 `opencode\command` 配置到 OpenCode 后使用 `/video-note <链接>`。完整阅读器解压后运行 `scripts\install.ps1`，安装器会根据当前 Windows 用户自动推导 OpenCode 与默认 Vault 路径；Vault 不在默认位置时传入 `-Vault "D:\你的 Vault"`。
+
 ### 安装步骤
 
-在仓库根目录 `E:\opai\youtube video analysis` 打开 PowerShell：
+在仓库或完整安装包根目录打开 PowerShell：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
@@ -76,7 +87,7 @@ Chrome 仍需一次手动加载：
 1. 打开 `chrome://extensions`。
 2. 开启右上角“开发者模式”。
 3. 点击“加载已解压的扩展程序”。
-4. 选择 `E:\opai\youtube video analysis\extension`。
+4. 选择解压目录中的 `extension` 文件夹。
 5. 打开扩展设置，选择 OpenCode 模型，确认 Obsidian Vault 路径并保存。
 
 桌面伴侣未启动时，先运行：
@@ -98,7 +109,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\restart_companion.ps1
 默认输出结构：
 
 ```text
-C:\Users\win11\Documents\Obsidian Vault\YouTube video\
+%USERPROFILE%\Documents\Obsidian Vault\YouTube video\
 ├── 中文标题 - English Title.md
 ├── transcripts\
 │   └── 待命名 - Original English Title.srt
@@ -109,7 +120,7 @@ C:\Users\win11\Documents\Obsidian Vault\YouTube video\
     └── ...
 ```
 
-笔记正文包含一句话摘要、核心知识点、详细内容、重点难点、可视化总结、学习图谱、行动建议、术语表和 SRT 链接。正文截图既支持 Obsidian `![[图片]]`，也支持标准 Markdown `![图注](图片)`；两种写法都会经过真实文件与抽帧清单校验。
+笔记正文包含一句话摘要、核心知识点、详细内容、重点难点、可视化总结、学习图谱、行动建议、术语表和 SRT 链接。Vault 内截图统一使用 Obsidian `![[YouTube video/assets/.../frame.jpg]]`，避免目录名中的空格被 Markdown 截断；每张图仍会经过真实文件与抽帧清单校验。终稿校验成功后，系统会自动删除 YAML `url` 完全相同的 `待命名 - ...` 草稿，不会删除没有终稿的中断草稿。
 
 ### 失败与恢复
 
