@@ -3,28 +3,29 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YouTube 阅读器设置</title>
+    <title>YouTube 阅读器连接</title>
     <link rel="stylesheet" href="options.css">
   </head>
   <body>
     <main>
-      <h1>YouTube 阅读器设置</h1>
-      <label>
-        OpenCode 模型
-        <input id="model" list="modelOptions" type="text" autocomplete="off" placeholder="正在读取已安装模型">
-        <datalist id="modelOptions"></datalist>
-      </label>
-      <label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="留空则保留 OpenCode 现有凭据"></label>
-      <label>Obsidian Vault<input id="vault" type="text"></label>
-      <label class="check-row">
-        <input id="autoOpenNote" type="checkbox">
-        <span>完成后自动在 Obsidian 打开笔记</span>
-      </label>
+      <h1>YouTube 阅读器连接</h1>
+      <p class="intro">模型、API Key 和 Vault 均由 Obsidian 的 YouTube Note Reader 插件统一管理。</p>
+      <section class="connection-card" aria-live="polite">
+        <div class="connection-title">
+          <span id="indicator"></span>
+          <strong id="connection">正在检测 Obsidian 插件…</strong>
+        </div>
+        <dl>
+          <div><dt>当前模型</dt><dd id="model">读取中</dd></div>
+          <div><dt>当前 Vault</dt><dd id="vault">读取中</dd></div>
+          <div><dt>插件版本</dt><dd id="pluginVersion">读取中</dd></div>
+        </dl>
+      </section>
       <div class="actions">
-        <button id="save">保存并验证</button>
+        <button id="openSettings">打开 Obsidian 设置</button>
         <button id="retry" class="secondary" type="button">重新检测</button>
-        <span id="status"></span>
       </div>
+      <p id="status"></p>
     </main>
     <script src="options.js"></script>
   </body>

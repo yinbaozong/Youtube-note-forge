@@ -1,16 +1,12 @@
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$Vault = (Join-Path $HOME 'Documents\Obsidian Vault'),
     [string]$OpenCodeRoot = (Join-Path $HOME '.config\opencode'),
-    [switch]$WhatIf
+    [switch]$IncludeOpenCode
 )
 
 $ErrorActionPreference = 'Stop'
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$destinations = @(
-    (Join-Path $OpenCodeRoot 'skills\youtube-transcript'),
-    (Join-Path $Vault '.obsidian\skills\youtube-transcript')
-)
 $files = @(
     'VERSION',
     'SKILL.md',
@@ -24,40 +20,87 @@ $files = @(
     'scripts\deduplicate_transcript.py',
     'references\note-contract.md'
 )
+$coreFiles = @(
+    'VERSION',
+    'SKILL.md',
+    'scripts\extract_transcript.py',
+    'scripts\extract_frames.py',
+    'scripts\validate_note.py',
+    'scripts\video_common.py',
+    'scripts\video_note.py'
+)
 $obsoleteNames = @('chrome-auth-profile', 'node_modules', 'package.json', 'package-lock.json')
 
-function Copy-SkillFile([string]$destination, [string]$relative) {
-    $source = Join-Path $sourceRoot $relative
-    $target = Join-Path $destination $relative
-    if (-not (Test-Path -LiteralPath $source)) { throw "Missing source file: $source" }
-    $parent = Split-Path -Parent $target
-    if (-not $WhatIf) { New-Item -ItemType Directory -Force -Path $parent | Out-Null; Copy-Item -LiteralPath $source -Destination $target -Force }
-    Write-Host "SYNC $relative -> $destination"
+function Get-NormalizedPath([string]$Path) {
+    return [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
 }
 
-foreach ($destination in $destinations) {
-    if (-not $WhatIf) { New-Item -ItemType Directory -Force -Path $destination | Out-Null }
-    foreach ($relative in $files) { Copy-SkillFile $destination $relative }
-    foreach ($obsolete in $obsoleteNames) {
-        $target = Join-Path $destination $obsolete
-        if (Test-Path -LiteralPath $target) {
-            Write-Host "REMOVE obsolete $target"
-            if (-not $WhatIf) { Remove-Item -LiteralPath $target -Force -Recurse }
+function Assert-DirectChild([string]$Parent, [string]$Child) {
+    $parentPath = Get-NormalizedPath $Parent
+    $childPath = Get-NormalizedPath $Child
+    $prefix = $parentPath + [IO.Path]::DirectorySeparatorChar
+    if (-not $childPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove path outside Skill destination: $childPath"
+    }
+    if (Test-Path -LiteralPath $childPath) {
+        $item = Get-Item -LiteralPath $childPath -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to recursively remove a reparse point: $childPath"
         }
     }
-    foreach ($relative in @('VERSION', 'SKILL.md', 'scripts\extract_transcript.py', 'scripts\extract_frames.py', 'scripts\validate_note.py', 'scripts\video_common.py', 'scripts\video_note.py')) {
-        $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sourceRoot $relative)).Hash
-        $targetHash = if ($WhatIf) { $sourceHash } else { (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $destination $relative)).Hash }
-        if ($sourceHash -ne $targetHash) { throw "Hash mismatch for $relative at $destination" }
+}
+
+function Copy-Skill([string]$Destination) {
+    foreach ($relative in $files) {
+        $source = Join-Path $sourceRoot $relative
+        $target = Join-Path $Destination $relative
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing source file: $source" }
+        if ($PSCmdlet.ShouldProcess($target, 'Synchronize Skill file')) {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            Copy-Item -LiteralPath $source -Destination $target -Force
+        }
+    }
+
+    foreach ($obsolete in $obsoleteNames) {
+        $target = Join-Path $Destination $obsolete
+        if (Test-Path -LiteralPath $target) {
+            Assert-DirectChild $Destination $target
+            if ($PSCmdlet.ShouldProcess($target, 'Remove obsolete Skill artifact')) {
+                Remove-Item -LiteralPath $target -Recurse -Force
+            }
+        }
+    }
+
+    if (-not $WhatIfPreference) {
+        foreach ($relative in $coreFiles) {
+            $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sourceRoot $relative)).Hash
+            $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $Destination $relative)).Hash
+            if ($sourceHash -ne $targetHash) { throw "Hash mismatch for $relative at $Destination" }
+        }
     }
 }
 
-$globalRoot = $OpenCodeRoot
-$agentTarget = Join-Path $globalRoot 'agent\video-note.md'
-$commandTarget = Join-Path $globalRoot 'command\video-note.md'
-if (-not $WhatIf) {
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $agentTarget), (Split-Path -Parent $commandTarget) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $sourceRoot 'opencode\agent\video-note.md') -Destination $agentTarget -Force
-    Copy-Item -LiteralPath (Join-Path $sourceRoot 'opencode\command\video-note.md') -Destination $commandTarget -Force
+if (-not (Test-Path -LiteralPath $Vault -PathType Container)) { throw "Obsidian Vault does not exist: $Vault" }
+$vaultSkill = Join-Path $Vault '.obsidian\skills\youtube-transcript'
+Copy-Skill $vaultSkill
+Write-Host "Vault Skill synchronized: $vaultSkill"
+
+if ($IncludeOpenCode) {
+    $openCodeSkill = Join-Path $OpenCodeRoot 'skills\youtube-transcript'
+    Copy-Skill $openCodeSkill
+
+    foreach ($mapping in @(
+        @{ Source = 'opencode\agent\video-note.md'; Target = (Join-Path $OpenCodeRoot 'agent\video-note.md') },
+        @{ Source = 'opencode\command\video-note.md'; Target = (Join-Path $OpenCodeRoot 'command\video-note.md') }
+    )) {
+        if ($PSCmdlet.ShouldProcess($mapping.Target, 'Install optional OpenCode integration')) {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $mapping.Target) | Out-Null
+            Copy-Item -LiteralPath (Join-Path $sourceRoot $mapping.Source) -Destination $mapping.Target -Force
+        }
+    }
+    Write-Host "Optional OpenCode integration synchronized: $OpenCodeRoot"
+} else {
+    Write-Host 'OpenCode synchronization skipped. Use -IncludeOpenCode only for the Skill-only workflow.'
 }
-Write-Host "youtube-transcript version $((Get-Content -Raw -Encoding UTF8 (Join-Path $sourceRoot 'VERSION')).Trim()) is synchronized. Restart OpenCode to load it."
+
+Write-Host "youtube-transcript version $((Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $sourceRoot 'VERSION')).Trim()) is synchronized."

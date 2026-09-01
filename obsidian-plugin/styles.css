@@ -1,0 +1,11 @@
+.youtube-note-reader-status {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+}
+
+.youtube-note-reader-warning {
+  color: var(--text-error);
+}

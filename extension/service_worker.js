@@ -1,25 +1,25 @@
-const COMPANION_BASE = "http://127.0.0.1:32191";
-const DEFAULT_SETTINGS = {
-  model: "deepseek/deepseek-v4-pro",
-  vault: "",
-  auto_open_note: true
-};
+importScripts("protocol.js");
 
-let state = {
-  status: "idle",
-  stage: "idle",
-  message: "准备就绪",
-  elapsed_seconds: 0,
-  progress_percent: 0,
-  note_path: "",
-  screenshot_count: 0,
-  screenshot_dir: "",
-  video_title: "",
-  video_url: "",
-  output_dir: ""
-};
+const PLUGIN_BASE = "http://127.0.0.1:32191";
+const {
+  CONNECTION_ERROR_CODE,
+  CONNECTION_ERROR_MESSAGE,
+  buildStartPayload,
+  createInitialState,
+  isAsrRetryableCode,
+  normalizePluginSettings,
+  statusPatch
+} = YouTubeReaderProtocol;
+
+let state = createInitialState();
 let pollTimer = null;
 let activePoll = null;
+
+function createConnectionError() {
+  const error = new Error(CONNECTION_ERROR_MESSAGE);
+  error.code = CONNECTION_ERROR_CODE;
+  return error;
+}
 
 async function updateActionIndicator(jobState) {
   let badge = "";
@@ -53,90 +53,71 @@ async function updateState(patch) {
   await updateActionIndicator(state);
 }
 
-async function companionFetch(path, options = {}) {
+async function pluginFetch(path, options = {}) {
   let response;
   try {
-    response = await fetch(COMPANION_BASE + path, options);
+    response = await fetch(PLUGIN_BASE + path, options);
   } catch (_error) {
-    throw new Error("本地桌面伴侣未启动。请运行项目 scripts\\restart_companion.ps1；若尚未安装，请运行 scripts\\install.ps1。安装文件位于 %LOCALAPPDATA%\\YouTubeNoteReader\\youtube_reader_host.py。");
+    throw createConnectionError();
   }
   let payload = {};
   try {
     payload = await response.json();
   } catch (_error) {
-    throw new Error("本地桌面伴侣返回了无效响应");
+    throw new Error("Obsidian 插件返回了无效响应");
   }
   if (!response.ok || payload?.type === "error") {
-    throw new Error(payload?.message || `本地桌面伴侣请求失败（${response.status}）`);
+    const error = new Error(payload?.message || `Obsidian 插件请求失败（${response.status}）`);
+    error.code = payload?.code || "OBSIDIAN_PLUGIN_REQUEST_FAILED";
+    error.can_retry_asr = payload?.can_retry_asr === true;
+    throw error;
   }
   return payload;
 }
 
-function companionRequest(payload) {
-  return companionFetch("/rpc", {
+function pluginRequest(payload) {
+  return pluginFetch("/rpc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 }
 
-function companionStatus(requestId) {
-  return companionFetch("/status?request_id=" + encodeURIComponent(requestId));
+function pluginStatus(requestId) {
+  return pluginFetch("/status?request_id=" + encodeURIComponent(requestId));
 }
 
-function companionHealth() {
-  return companionFetch("/health");
+function pluginHealth() {
+  return pluginFetch("/health");
 }
 
-function companionActive() {
-  return companionFetch("/active");
+function pluginActive() {
+  return pluginFetch("/active");
 }
 
-function companionLatest() {
-  return companionFetch("/latest");
+function pluginLatest() {
+  return pluginFetch("/latest");
 }
 
-async function getSettings() {
-  return { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
+function pluginOutputDir(environment) {
+  if (environment.output_dir) return environment.output_dir;
+  const vault = environment.current_vault || environment.vault || environment.default_vault || "";
+  return vault ? vault.replace(/[\\/]+$/, "") + "\\YouTube video" : "由 Obsidian 插件确定";
 }
 
-function statusPatch(message) {
-  const patch = {
-    status: message.status || state.status,
-    stage: message.stage || state.stage,
-    message: message.message || state.message,
-    elapsed_seconds: message.elapsed_seconds ?? state.elapsed_seconds,
-    progress_percent: message.progress_percent ?? state.progress_percent ?? 0,
-    current: message.current ?? state.current,
-    total: message.total ?? state.total
-  };
-  if (message.code) patch.code = message.code;
-  for (const key of ["video_title", "video_url", "output_dir"]) {
-    if (message[key]) patch[key] = message[key];
+async function getPluginSettings() {
+  const health = await pluginHealth();
+  let settings = {};
+  try {
+    settings = await pluginRequest({ type: "get_settings", request_id: crypto.randomUUID() });
+  } catch (error) {
+    if (error.code === CONNECTION_ERROR_CODE) throw error;
   }
-  if (message.screenshot_dir) patch.screenshot_dir = message.screenshot_dir;
-  if (message.type === "attached" && message.active_request_id) {
-    patch.request_id = message.active_request_id;
-    patch.status = "running";
-  }
-  if (message.type === "complete") {
-    patch.status = "ok";
-    patch.note_path = message.note_path || "";
-    patch.screenshot_count = message.screenshot_count || 0;
-    patch.screenshot_dir = message.screenshot_dir || state.screenshot_dir || "";
-    patch.message = message.note_opened
-      ? "学习笔记已生成，已在 Obsidian 打开"
-      : "学习笔记已生成并通过校验";
-    patch.progress_percent = 100;
-    patch.auto_opened = Boolean(message.note_opened);
-  } else if (message.type === "error") {
-    patch.status = "error";
-    patch.current = message.current || 0;
-    patch.total = message.total || 0;
-  } else if (message.type === "cancelled") {
-    patch.status = "cancelled";
-  }
-  return patch;
+  return normalizePluginSettings(health, settings);
+}
+
+function applyStatus(message) {
+  return statusPatch(state, message);
 }
 
 function stopPolling() {
@@ -148,9 +129,9 @@ async function pollJob() {
   if (activePoll || state.status !== "running" || !state.request_id) return state;
   activePoll = (async () => {
     try {
-      let message = await companionStatus(state.request_id);
+      let message = await pluginStatus(state.request_id);
       if (message.status === "idle") {
-        const latest = await companionLatest();
+        const latest = await pluginLatest();
         message = latest.request_id === state.request_id && ["ok", "error", "cancelled"].includes(latest.status)
           ? latest
           : {
@@ -162,11 +143,17 @@ async function pollJob() {
               message: "活动任务已经中断。可点击“继续上次任务”，复用已有素材并完成文章。"
             };
       }
-      await updateState(statusPatch(message));
+      await updateState(applyStatus(message));
       if (state.status !== "running") stopPolling();
     } catch (error) {
       stopPolling();
-      await updateState({ status: "error", stage: "failed", message: error.message });
+      await updateState({
+        status: "error",
+        stage: "failed",
+        message: error.message,
+        code: error.code || "",
+        can_retry_asr: error.can_retry_asr === true || isAsrRetryableCode(error.code)
+      });
     } finally {
       activePoll = null;
     }
@@ -180,132 +167,144 @@ function startPolling() {
   pollTimer = setInterval(pollJob, 5000);
 }
 
-async function startJob() {
+function cleanVideoTitle(title) {
+  return (title || "当前 YouTube 视频")
+    .replace(/^\(\d+\)\s*/, "")
+    .replace(/\s+-\s+YouTube$/, "")
+    .trim();
+}
+
+function isYouTubeUrl(url) {
+  return /^(https:\/\/(www\.|m\.)?youtube\.com\/(watch|shorts)\b|https:\/\/youtu\.be\/)/.test(url || "");
+}
+
+async function startJob(options = {}) {
   if (state.status === "running") {
     await pollJob();
     startPolling();
     return state;
   }
+
   let active;
   try {
-    active = await companionActive();
+    active = await pluginActive();
   } catch (error) {
-    await updateState({ status: "error", stage: "failed", message: error.message });
-    throw error;
+    await updateState(createInitialState({
+      status: "error",
+      stage: "failed",
+      message: error.message,
+      code: error.code || ""
+    }));
+    return state;
   }
   if (active.status === "running" && active.request_id) {
-    await updateState(statusPatch(active));
+    await updateState(applyStatus(active));
     await updateState({ request_id: active.request_id });
     startPolling();
     return state;
   }
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const youtubePattern = /^(https:\/\/(www\.|m\.)?youtube\.com\/(watch|shorts)\b|https:\/\/youtu\.be\/)/;
-  if (!tab?.url || !youtubePattern.test(tab.url)) throw new Error("请先打开一个 YouTube 视频页面");
-  const settings = await getSettings();
-  const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
-  if (!cookies.length) throw new Error("没有读取到 YouTube Cookie，请先登录 YouTube");
-  const requestId = crypto.randomUUID();
-  const videoTitle = (tab.title || "当前 YouTube 视频")
-    .replace(/^\(\d+\)\s*/, "")
-    .replace(/\s+-\s+YouTube$/, "")
-    .trim();
-  const outputDir = settings.vault
-    ? settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video"
-    : "由桌面伴侣自动选择\\YouTube video";
-  await updateState({
+  const url = options.url || tab?.url || "";
+  if (!isYouTubeUrl(url)) {
+    await updateState(createInitialState({
+      status: "error",
+      stage: "failed",
+      message: "请先打开一个 YouTube 视频页面"
+    }));
+    return state;
+  }
+  const title = cleanVideoTitle(options.title || (url === tab?.url ? tab?.title : state.video_title));
+  const resume = Boolean(options.resume);
+  const allowAsr = Boolean(options.allow_asr);
+  await updateState(createInitialState({
     status: "running",
     stage: "credentials",
-    message: "正在把当前视频交给 youtube-transcript Skill",
-    elapsed_seconds: 0,
+    message: allowAsr ? "正在同步 Cookie，随后将使用 ASR" : "正在同步 YouTube Cookie",
     progress_percent: 1,
+    video_title: title,
+    video_url: url,
+    output_dir: "由 Obsidian 插件确定",
+    allow_asr: allowAsr
+  }));
+  const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
+  if (!cookies.length) {
+    await updateState({ status: "error", stage: "failed", message: "没有读取到 YouTube Cookie，请先登录 YouTube" });
+    return state;
+  }
+
+  let environment = {};
+  try {
+    environment = await pluginHealth();
+  } catch (error) {
+    await updateState({ status: "error", stage: "failed", message: error.message, code: error.code || "" });
+    return state;
+  }
+
+  const requestId = crypto.randomUUID();
+  await updateState({
+    ...createInitialState(),
+    status: "running",
+    stage: "credentials",
+    message: allowAsr
+      ? "已允许 ASR，正在准备下载音频并生成字幕"
+      : resume
+        ? "正在恢复上次任务，并检查可复用的字幕、截图和草稿"
+        : "正在把当前视频交给 Obsidian 插件处理",
+    progress_percent: resume ? 4 : 1,
     current: 0,
     total: 0,
-    note_path: "",
-    screenshot_count: 0,
-    screenshot_dir: "",
-    code: "",
-    video_title: videoTitle,
-    video_url: tab.url,
-    output_dir: outputDir,
-    auto_opened: false,
-    request_id: requestId
+    video_title: title,
+    video_url: url,
+    output_dir: pluginOutputDir(environment),
+    request_id: requestId,
+    allow_asr: allowAsr,
+    can_retry_asr: false
   });
+
   try {
-    const response = await companionRequest({
-      type: "start_job",
-      request_id: requestId,
-      url: tab.url,
-      video_title: videoTitle,
-      model: settings.model,
-      vault: settings.vault,
-      auto_open_note: settings.auto_open_note,
-      cookies
-    });
-    await updateState(statusPatch(response));
+    const response = await pluginRequest(buildStartPayload({
+      requestId,
+      url,
+      title,
+      cookies,
+      resume,
+      allowAsr
+    }));
+    await updateState(applyStatus(response));
     if (response.type === "attached" && response.active_request_id) {
       await updateState({ request_id: response.active_request_id });
     }
     startPolling();
-    return state;
   } catch (error) {
-    await updateState({ status: "error", stage: "failed", message: error.message });
-    throw error;
+    await updateState({
+      status: "error",
+      stage: "failed",
+      message: error.message,
+      code: error.code || "",
+      can_retry_asr: error.can_retry_asr === true || isAsrRetryableCode(error.code)
+    });
   }
+  return state;
 }
 
 async function resumeJob() {
   if (state.status === "running") return state;
-  const settings = await getSettings();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const youtubePattern = /^(https:\/\/(www\.|m\.)?youtube\.com\/(watch|shorts)\b|https:\/\/youtu\.be\/)/;
-  const url = state.video_url || (youtubePattern.test(tab?.url || "") ? tab.url : "");
+  const url = state.video_url || (isYouTubeUrl(tab?.url) ? tab.url : "");
   if (!url) throw new Error("找不到上次任务的视频链接，请重新打开原视频页面");
-  const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
-  if (!cookies.length) throw new Error("没有读取到 YouTube Cookie，请先登录 YouTube");
-  const requestId = crypto.randomUUID();
-  const videoTitle = state.video_title || (tab?.title || "上次未完成的视频").replace(/\s+-\s+YouTube$/, "").trim();
-  await updateState({
-    status: "running",
-    stage: "credentials",
-    message: "正在恢复上次任务，并检查可复用的字幕、截图和草稿",
-    elapsed_seconds: 0,
-    progress_percent: 4,
-    current: 0,
-    total: 0,
-    code: "",
-    video_title: videoTitle,
-    video_url: url,
-    output_dir: settings.vault
-      ? settings.vault.replace(/[\\/]+$/, "") + "\\YouTube video"
-      : "由桌面伴侣自动选择\\YouTube video",
-    request_id: requestId
+  return startJob({
+    url,
+    title: state.video_title || cleanVideoTitle(tab?.title || "上次未完成的视频"),
+    resume: true,
+    allow_asr: state.allow_asr === true
   });
-  try {
-    const response = await companionRequest({
-      type: "start_job",
-      request_id: requestId,
-      url,
-      video_title: videoTitle,
-      model: settings.model,
-      vault: settings.vault,
-      auto_open_note: settings.auto_open_note,
-      resume: true,
-      cookies
-    });
-    await updateState(statusPatch(response));
-    startPolling();
-    return state;
-  } catch (error) {
-    await updateState({ status: "error", stage: "failed", message: error.message });
-    return state;
-  }
 }
 
 async function cancelJob() {
   const wasRunning = state.status === "running";
   if (wasRunning && state.request_id) {
-    await companionRequest({ type: "cancel_job", request_id: state.request_id });
+    await pluginRequest({ type: "cancel_job", request_id: state.request_id });
   }
   stopPolling();
   if (wasRunning) {
@@ -314,99 +313,84 @@ async function cancelJob() {
       stage: "cancelled",
       message: "任务已强制停止",
       current: 0,
-      total: 0
+      total: 0,
+      can_retry_asr: false
     });
     return;
   }
-  await updateState({
-    status: "idle",
-    stage: "idle",
+  try {
+    await pluginRequest({ type: "clear_job", request_id: state.request_id || crypto.randomUUID() });
+  } catch (_error) {
+    // Local state can still be cleared while Obsidian is temporarily offline.
+  }
+  await updateState(createInitialState({
     message: "准备就绪，可以开始新任务",
-    elapsed_seconds: 0,
-    progress_percent: 0,
-    current: 0,
-    total: 0,
-    note_path: "",
-    screenshot_count: 0,
-    screenshot_dir: "",
-    code: "",
-    video_title: "",
-    video_url: "",
-    output_dir: "",
-    request_id: ""
-  });
+    dismissed_request_id: state.request_id || state.dismissed_request_id || ""
+  }));
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     if (message.type === "get_status") {
       const stored = await chrome.storage.session.get("jobState");
-      if (stored.jobState) state = stored.jobState;
+      if (stored.jobState) state = createInitialState(stored.jobState);
       if (state.status === "running") await pollJob();
       if (state.status !== "running") {
         try {
-          const active = await companionActive();
+          const active = await pluginActive();
           if (active.status === "running" && active.request_id) {
-            await updateState(statusPatch(active));
+            await updateState(applyStatus(active));
             await updateState({ request_id: active.request_id });
             startPolling();
           } else {
-            const latest = await companionLatest();
+            const latest = await pluginLatest();
             if (
               ["ok", "error", "cancelled"].includes(latest.status)
               && (state.status === "idle" || latest.request_id !== state.request_id)
+              && latest.request_id !== state.dismissed_request_id
             ) {
-              await updateState(statusPatch(latest));
+              await updateState(applyStatus(latest));
               await updateState({ request_id: latest.request_id });
             }
           }
         } catch (_error) {
-          // The normal error is rendered from the stored task state below.
+          // Keep the persisted job visible while Obsidian is closed or reconnecting.
         }
-      }
-      if (state.status === "error" && /native messaging host/i.test(state.message || "")) {
-        await companionHealth();
-        await updateState({ status: "idle", stage: "idle", message: "准备就绪", elapsed_seconds: 0 });
       }
       return state;
     }
-    if (message.type === "start_job") return await startJob();
-    if (message.type === "resume_job") return await resumeJob();
+    if (message.type === "start_job") return startJob(message);
+    if (message.type === "resume_job") return resumeJob();
     if (message.type === "cancel_job") {
       await cancelJob();
       return state;
     }
     if (message.type === "retry_connection") {
       try {
-        await companionHealth();
-        await updateState({ status: "idle", stage: "idle", message: "桌面伴侣已连接，可以开始新任务", elapsed_seconds: 0, progress_percent: 0 });
+        await pluginHealth();
+        await updateState(createInitialState({ message: "已连接 Obsidian 插件，可以开始新任务" }));
       } catch (error) {
-        await updateState({ status: "error", stage: "failed", message: error.message });
+        await updateState({ status: "error", stage: "failed", message: error.message, code: error.code || "" });
       }
       return state;
     }
-    if (message.type === "list_models") {
-      return await companionRequest({ type: "list_models", request_id: crypto.randomUUID() });
-    }
-    if (message.type === "get_environment") return await companionHealth();
-    if (message.type === "configure") {
-      return await companionRequest({
-        type: "configure",
-        request_id: crypto.randomUUID(),
-        model: message.model,
-        api_key: message.api_key || ""
-      });
+    if (message.type === "get_settings") return getPluginSettings();
+    if (message.type === "open_obsidian_settings") {
+      return pluginRequest({ type: "open_settings", request_id: crypto.randomUUID() });
     }
     if (message.type === "open_note") {
-      const settings = await getSettings();
-      return await companionRequest({
+      return pluginRequest({
         type: "open_note",
         request_id: crypto.randomUUID(),
-        note_path: message.note_path,
-        vault: settings.vault
+        note_path: message.note_path
       });
     }
     throw new Error("未知插件消息");
-  })().then(sendResponse).catch(error => sendResponse({ type: "error", message: error.message }));
+  })().then(sendResponse).catch(error => sendResponse({
+    type: "error",
+    message: error.message,
+    code: error.code || "",
+    can_retry_asr: error.can_retry_asr === true || isAsrRetryableCode(error.code)
+  }));
   return true;
 });

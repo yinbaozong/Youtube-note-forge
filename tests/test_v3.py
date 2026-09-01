@@ -13,20 +13,52 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from extract_frames import attach_manifest_to_note, extract_candidate, load_plan, resolve_ffmpeg  # noqa: E402
-from extract_transcript import image_quality_score  # noqa: E402
+from extract_transcript import RunResult, SubtitleChoice, download_subtitle, image_quality_score, transcript_unavailable_error  # noqa: E402
 from validate_note import validate  # noqa: E402
 from video_common import VERSION, version_text  # noqa: E402
 from video_note import version_report  # noqa: E402
 
 
 class V3ContractTests(unittest.TestCase):
+    def test_subtitle_download_failure_is_not_misreported_as_no_subtitles(self) -> None:
+        error = transcript_unavailable_error(
+            SubtitleChoice(lang="en", source="manual"),
+            "ERROR: HTTP Error 429: Too Many Requests",
+        )
+        self.assertEqual(error.code, "SUBTITLE_DOWNLOAD_FAILED")
+        self.assertIn("en", str(error))
+        self.assertIn("429", str(error))
+
+    def test_video_without_subtitle_still_reports_subtitle_unavailable(self) -> None:
+        error = transcript_unavailable_error(None, "")
+        self.assertEqual(error.code, "SUBTITLE_UNAVAILABLE")
+
+    def test_subtitle_download_has_a_bounded_timeout(self) -> None:
+        class FakeRunner:
+            timeout: int | None = None
+
+            def run(self, args, *, purpose, check, timeout=None):
+                self.timeout = timeout
+                return RunResult(args=args, returncode=1, stdout="", stderr="timeout", credential_label="")
+
+        with tempfile.TemporaryDirectory() as raw:
+            runner = FakeRunner()
+            download_subtitle(
+                runner,  # type: ignore[arg-type]
+                "https://www.youtube.com/watch?v=J1WoNuemKOg",
+                {"id": "J1WoNuemKOg"},
+                SubtitleChoice(lang="en", source="manual"),
+                Path(raw),
+            )
+        self.assertEqual(runner.timeout, 45)
+
     def test_version_is_single_source(self) -> None:
-        self.assertEqual(VERSION, "3.4.1")
-        self.assertEqual(version_text(), "youtube-transcript 3.4.1")
+        self.assertEqual(VERSION, "4.0.0")
+        self.assertEqual(version_text(), "youtube-transcript 4.0.0")
 
     def test_version_report_contains_core_hashes(self) -> None:
         report = version_report()
-        self.assertEqual(report["skill_version"], "3.4.1")
+        self.assertEqual(report["skill_version"], "4.0.0")
         self.assertIn("scripts/extract_frames.py", report["core_sha256"])
 
     def test_frame_plan_accepts_utf8_bom(self) -> None:
@@ -123,6 +155,13 @@ frame_manifest: "YouTube video/assets/frame-manifest.json"
                 "![关键操作界面](YouTube video/assets/frame.jpg)",
             )
             note.write_text(markdown_image, encoding="utf-8")
+            self.assertIn("MARKDOWN_IMAGE_PATH_UNSAFE", {item["code"] for item in validate(note, vault)})
+
+            escaped_markdown_image = content.replace(
+                "![[YouTube video/assets/frame.jpg|720]]",
+                "![关键操作界面](<YouTube video/assets/frame.jpg>)",
+            )
+            note.write_text(escaped_markdown_image, encoding="utf-8")
             self.assertEqual(validate(note, vault), [])
 
     def test_missing_image_is_reported(self) -> None:

@@ -1,83 +1,49 @@
+const connectionNode = document.getElementById("connection");
+const indicatorNode = document.getElementById("indicator");
 const modelNode = document.getElementById("model");
-const modelOptionsNode = document.getElementById("modelOptions");
-const apiKeyNode = document.getElementById("apiKey");
 const vaultNode = document.getElementById("vault");
-const autoOpenNoteNode = document.getElementById("autoOpenNote");
+const pluginVersionNode = document.getElementById("pluginVersion");
 const statusNode = document.getElementById("status");
+const openSettings = document.getElementById("openSettings");
+const retry = document.getElementById("retry");
 
-const RECOMMENDED_MODEL = "deepseek/deepseek-v4-pro";
-
-async function loadModels(savedModel = "") {
-  statusNode.textContent = "正在读取 OpenCode 模型…";
-  modelOptionsNode.replaceChildren();
-  const response = await chrome.runtime.sendMessage({ type: "list_models" });
-  if (response?.type === "error") {
-    statusNode.textContent = "本机组件未连接：" + response.message;
-    modelNode.placeholder = "可手动输入 provider/model，修复连接后再验证";
-    return false;
-  }
-  const models = response.models || [];
-  for (const model of models) {
-    const option = document.createElement("option");
-    option.value = model;
-    modelOptionsNode.appendChild(option);
-  }
-  if (!modelNode.value) {
-    modelNode.value = savedModel || (models.includes(RECOMMENDED_MODEL) ? RECOMMENDED_MODEL : models[0] || "");
-  }
-  statusNode.textContent = models.length
-    ? `已读取 ${models.length} 个模型，可搜索或直接输入`
-    : "OpenCode 没有返回可用模型，可手动输入 provider/model";
-  return true;
+function showDisconnected(message) {
+  indicatorNode.className = "error";
+  connectionNode.textContent = "未连接";
+  modelNode.textContent = "不可用";
+  vaultNode.textContent = "不可用";
+  pluginVersionNode.textContent = "不可用";
+  statusNode.textContent = message || "请先打开 Obsidian，并启用 YouTube Note Reader 插件。";
+  openSettings.disabled = true;
 }
 
 async function load() {
-  const settings = await chrome.storage.local.get({
-    model: "",
-    vault: "",
-    auto_open_note: true
-  });
-  let vault = settings.vault;
-  if (!vault) {
-    const environment = await chrome.runtime.sendMessage({ type: "get_environment" });
-    if (environment?.default_vault) {
-      vault = environment.default_vault;
-      await chrome.storage.local.set({ vault });
-    }
+  retry.disabled = true;
+  statusNode.textContent = "正在检测 Obsidian 插件…";
+  const response = await chrome.runtime.sendMessage({ type: "get_settings" });
+  retry.disabled = false;
+  if (response?.type === "error" || !response?.connected) {
+    showDisconnected(response?.message);
+    return;
   }
-  vaultNode.value = vault;
-  autoOpenNoteNode.checked = settings.auto_open_note !== false;
-  modelNode.value = settings.model;
-  await loadModels(settings.model);
+  indicatorNode.className = "ok";
+  connectionNode.textContent = "已连接 Obsidian 插件";
+  modelNode.textContent = response.model || "未配置";
+  vaultNode.textContent = response.vault || "未配置";
+  pluginVersionNode.textContent = response.plugin_version || "未知";
+  statusNode.textContent = "配置只在 Obsidian 中修改，Chrome 不保存模型、API Key 或 Vault。";
+  openSettings.disabled = false;
 }
 
-document.getElementById("save").addEventListener("click", async () => {
-  const model = modelNode.value;
-  if (!model) {
-    statusNode.textContent = "请选择模型";
-    return;
-  }
-  statusNode.textContent = "正在保存…";
-  const response = await chrome.runtime.sendMessage({
-    type: "configure",
-    model,
-    api_key: apiKeyNode.value
-  });
-  if (response?.type === "error") {
-    statusNode.textContent = response.message;
-    return;
-  }
-  await chrome.storage.local.set({
-    model,
-    vault: vaultNode.value.trim(),
-    auto_open_note: autoOpenNoteNode.checked
-  });
-  apiKeyNode.value = "";
-  statusNode.textContent = "已固定使用 " + model;
+openSettings.addEventListener("click", async () => {
+  openSettings.disabled = true;
+  statusNode.textContent = "正在打开 Obsidian 插件设置…";
+  const response = await chrome.runtime.sendMessage({ type: "open_obsidian_settings" });
+  openSettings.disabled = false;
+  statusNode.textContent = response?.type === "error"
+    ? response.message
+    : "已请求 Obsidian 打开 YouTube Note Reader 设置。";
 });
 
-document.getElementById("retry").addEventListener("click", async () => {
-  await loadModels(modelNode.value.trim());
-});
-
+retry.addEventListener("click", load);
 load();

@@ -3,6 +3,7 @@
   color: #18202a;
   background: #f4f6f8;
 }
+* { box-sizing: border-box; }
 body { margin: 0; }
 main {
   width: min(680px, calc(100% - 40px));
@@ -12,20 +13,23 @@ main {
   border: 1px solid #dce1e7;
   border-radius: 8px;
 }
-h1 { margin: 0 0 24px; font-size: 24px; letter-spacing: 0; }
-label { display: grid; gap: 8px; margin: 18px 0; font-weight: 600; }
-.check-row { display: flex; align-items: center; gap: 10px; }
-.check-row input { width: 18px; min-height: 18px; margin: 0; }
-input, select {
-  min-height: 42px;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  border: 1px solid #aeb7c2;
+h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+.intro { margin: 10px 0 22px; color: #566270; line-height: 1.6; }
+.connection-card {
+  padding: 18px;
+  border: 1px solid #dce1e7;
   border-radius: 6px;
-  background: #fff;
-  font: inherit;
+  background: #fafbfc;
 }
-.actions { display: flex; align-items: center; gap: 14px; margin-top: 24px; }
+.connection-title { display: flex; align-items: center; gap: 10px; }
+#indicator { width: 10px; height: 10px; border-radius: 50%; background: #d99a00; }
+#indicator.ok { background: #198754; }
+#indicator.error { background: #c73535; }
+dl { margin: 18px 0 0; }
+dl div { display: grid; grid-template-columns: 100px 1fr; gap: 14px; padding: 10px 0; border-top: 1px solid #e4e8ed; }
+dt { color: #657180; }
+dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+.actions { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
 button {
   min-height: 40px;
   padding: 0 16px;
@@ -35,8 +39,6 @@ button {
   background: #202936;
   font-weight: 600;
 }
-button.secondary {
-  color: #202936;
-  background: #fff;
-}
-#status { color: #566270; }
+button.secondary { color: #202936; background: #fff; }
+button:disabled { opacity: .55; }
+#status { min-height: 24px; color: #566270; line-height: 1.5; }

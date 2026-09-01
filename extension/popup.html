@@ -31,18 +31,23 @@
         <li data-stage="validation">校验</li>
         <li data-stage="complete">完成</li>
       </ol>
+      <div id="asrNotice" class="notice" hidden>
+        字幕不可用或处理失败。允许 ASR 后会下载音频并进行语音识别，耗时会更长。
+      </div>
       <div id="result" hidden></div>
     </main>
     <footer>
       <button id="start">生成学习笔记</button>
       <button id="resume" class="secondary" hidden>继续上次任务</button>
+      <button id="retryAsr" class="asr" hidden>允许 ASR 并重试</button>
       <button id="cancel" class="danger" hidden>强制停止</button>
       <button id="openNote" class="secondary" hidden>在 Obsidian 打开</button>
       <button id="copyPath" class="secondary" hidden>复制路径</button>
       <button id="copyPhotosPath" class="secondary" hidden>复制照片路径</button>
       <button id="retryConnection" class="secondary" hidden>重试连接</button>
-      <button id="settingsFooter" class="secondary">设置模型</button>
+      <button id="settingsFooter" class="secondary">连接与设置</button>
     </footer>
+    <script src="protocol.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

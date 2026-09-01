@@ -4,79 +4,109 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Net.Http
 $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $expectedVersion = (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $sourceRoot 'VERSION')).Trim()
-$installRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
-$hostTarget = Join-Path $installRoot 'youtube_reader_host.py'
-$runtimePath = Join-Path $installRoot 'runtime.json'
+$pluginId = 'youtube-note-reader'
+$pluginSource = Join-Path $sourceRoot 'obsidian-plugin'
+$pluginTarget = Join-Path $Vault ".obsidian\plugins\$pluginId"
+$communityPluginsPath = Join-Path $Vault '.obsidian\community-plugins.json'
+$pluginFiles = @('main.js', 'manifest.json', 'styles.css')
+$skillSourceFiles = @(
+    'VERSION',
+    'SKILL.md',
+    'requirements.txt',
+    'requirements-asr.txt',
+    'scripts\extract_transcript.py',
+    'scripts\extract_frames.py',
+    'scripts\validate_note.py',
+    'scripts\video_common.py',
+    'scripts\video_note.py',
+    'scripts\deduplicate_transcript.py',
+    'references\note-contract.md'
+)
+$vaultSkill = Join-Path $Vault '.obsidian\skills\youtube-transcript'
+$legacyRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
+$legacyHost = Join-Path $legacyRoot 'youtube_reader_host.py'
+$legacyExe = Join-Path $legacyRoot 'youtube-reader-host.exe'
 $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'YouTubeNoteReader'
-$legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host'
-$openCodeVersion = Join-Path $HOME '.config\opencode\skills\youtube-transcript\VERSION'
+$nativeHostPaths = @(
+    'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host',
+    'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.youtube_note_reader.host'
+)
 
-foreach ($path in @(
-    (Join-Path $sourceRoot 'extension\manifest.json'),
-    $hostTarget,
-    $runtimePath,
-    (Join-Path $Vault '.obsidian\skills\youtube-transcript\VERSION'),
-    $openCodeVersion
-)) {
-    if (-not (Test-Path -LiteralPath $path)) { throw "Missing installation file: $path" }
+function Get-NormalizedPath([string]$Path) {
+    return [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
 }
 
-$runtime = Get-Content -Raw -Encoding UTF8 -LiteralPath $runtimePath | ConvertFrom-Json
-foreach ($path in @($runtime.python, $runtime.launcher, $runtime.host)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing companion runtime path: $path" }
-}
-$sourceHostHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sourceRoot 'native_host\youtube_reader_host.py')).Hash
-$installedHostHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostTarget).Hash
-if ($sourceHostHash -ne $installedHostHash) { throw 'Installed desktop companion source hash does not match the repository.' }
-
-$runCommand = (Get-ItemProperty -Path $runPath -Name $runName -ErrorAction Stop).$runName
-if ($runCommand -ne ('"' + $runtime.launcher + '" "' + $hostTarget + '" --serve')) { throw 'Desktop companion startup registration is incorrect.' }
-if (Test-Path $legacyRegistryPath) { throw 'Legacy Chrome Native Messaging registration is still present.' }
-
-$manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $sourceRoot 'extension\manifest.json') | ConvertFrom-Json
-if ($manifest.version -ne $expectedVersion) { throw "Extension version mismatch: $($manifest.version) != $expectedVersion" }
-if ($manifest.permissions -contains 'nativeMessaging') { throw 'Extension must not depend on Chrome Native Messaging.' }
-if ($manifest.host_permissions -notcontains 'http://127.0.0.1:32191/*') { throw 'Extension local companion permission is missing.' }
-
-foreach ($versionPath in @(
-    (Join-Path $Vault '.obsidian\skills\youtube-transcript\VERSION'),
-    $openCodeVersion
-)) {
-    $actual = (Get-Content -Raw -Encoding UTF8 -LiteralPath $versionPath).Trim()
-    if ($actual -ne $expectedVersion) { throw "Skill version mismatch at ${versionPath}: $actual != $expectedVersion" }
+if (-not (Test-Path -LiteralPath $Vault -PathType Container)) { throw "Obsidian Vault does not exist: $Vault" }
+foreach ($command in @('python', 'ffmpeg', 'node')) {
+    if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Required command is missing: $command" }
 }
 
-& $runtime.python $hostTarget --self-test
-if ($LASTEXITCODE -ne 0) { throw 'Desktop companion self-test failed.' }
+foreach ($relative in $skillSourceFiles) {
+    $source = Join-Path $sourceRoot $relative
+    $installed = Join-Path $vaultSkill $relative
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing Skill source file: $source" }
+    if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) { throw "Missing installed Skill file: $installed" }
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash
+    $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash
+    if ($sourceHash -ne $installedHash) { throw "Installed Skill hash mismatch: $relative" }
+}
 
-$handler = [Net.Http.HttpClientHandler]::new()
-$handler.UseProxy = $false
-$client = [Net.Http.HttpClient]::new($handler)
-try {
-    $client.Timeout = [TimeSpan]::FromSeconds(3)
-    $json = $client.GetStringAsync('http://127.0.0.1:32191/health').GetAwaiter().GetResult()
-    $health = $json | ConvertFrom-Json
-    if ($health.status -ne 'ok' -or $health.version -ne $expectedVersion) {
-        throw "Desktop companion health mismatch: $json"
+if (-not (Test-Path -LiteralPath (Join-Path $pluginSource 'package.json') -PathType Leaf)) {
+    throw "OBSIDIAN_PLUGIN_SOURCE_MISSING: $pluginSource"
+}
+foreach ($name in $pluginFiles) {
+    $source = Join-Path $pluginSource $name
+    $installed = Join-Path $pluginTarget $name
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing plugin build output: $source" }
+    if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) { throw "Missing installed plugin file: $installed" }
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash) {
+        throw "Installed Obsidian plugin hash mismatch: $name"
     }
-} finally {
-    $client.Dispose()
-    $handler.Dispose()
 }
 
-foreach ($script in Get-ChildItem -LiteralPath (Join-Path $sourceRoot 'extension') -Filter '*.js') {
-    node --check $script.FullName
-    if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $($script.FullName)" }
+if (-not (Test-Path -LiteralPath $communityPluginsPath -PathType Leaf)) {
+    throw "Obsidian community plugin list is missing: $communityPluginsPath"
 }
-python -m unittest discover -s (Join-Path $sourceRoot 'tests') -p 'test*.py'
-if ($LASTEXITCODE -ne 0) { throw 'Skill tests failed.' }
+$enabledPlugins = @(Get-Content -Raw -Encoding UTF8 -LiteralPath $communityPluginsPath | ConvertFrom-Json)
+if ($enabledPlugins -notcontains $pluginId) { throw 'YouTube Note Reader is installed but not enabled in Obsidian.' }
+
+$sourceManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $pluginSource 'manifest.json') | ConvertFrom-Json
+$installedManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $pluginTarget 'manifest.json') | ConvertFrom-Json
+foreach ($manifest in @($sourceManifest, $installedManifest)) {
+    if ($manifest.id -ne $pluginId) { throw "Unexpected Obsidian plugin id: $($manifest.id)" }
+    if ($manifest.version -ne $expectedVersion) { throw "Obsidian plugin version mismatch: $($manifest.version) != $expectedVersion" }
+}
+
+$extensionManifestPath = Join-Path $sourceRoot 'extension\manifest.json'
+if (-not (Test-Path -LiteralPath $extensionManifestPath -PathType Leaf)) { throw "Missing Chrome extension manifest: $extensionManifestPath" }
+$extensionManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $extensionManifestPath | ConvertFrom-Json
+if ($extensionManifest.version -ne $expectedVersion) { throw "Chrome extension version mismatch: $($extensionManifest.version) != $expectedVersion" }
+if ($extensionManifest.permissions -contains 'nativeMessaging') { throw 'Chrome extension still requests Native Messaging.' }
+if ($extensionManifest.host_permissions -notcontains 'http://127.0.0.1:32191/*') {
+    throw 'Chrome extension cannot reach the Obsidian plugin: missing http://127.0.0.1:32191/* host permission.'
+}
+
+if (Get-ItemProperty -Path $runPath -Name $runName -ErrorAction SilentlyContinue) {
+    throw 'Legacy YouTube Reader startup registration still exists.'
+}
+foreach ($registryPath in $nativeHostPaths) {
+    if (Test-Path -LiteralPath $registryPath) { throw "Legacy Native Messaging registration still exists: $registryPath" }
+}
+$legacyProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ($_.CommandLine -and $_.CommandLine.IndexOf($legacyHost, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+    ($_.ExecutablePath -and [string]::Equals((Get-NormalizedPath $_.ExecutablePath), (Get-NormalizedPath $legacyExe), [StringComparison]::OrdinalIgnoreCase))
+})
+if ($legacyProcesses.Count -gt 0) { throw 'A legacy YouTube Reader desktop companion process is still running.' }
+if (Test-Path -LiteralPath $legacyRoot) { throw "Legacy YouTube Reader runtime still exists: $legacyRoot" }
+
+& (Get-Command node -ErrorAction Stop).Source --check (Join-Path $pluginTarget 'main.js')
+if ($LASTEXITCODE -ne 0) { throw 'Installed Obsidian plugin JavaScript syntax check failed.' }
 
 Write-Host "YouTube Reader $expectedVersion installation is valid."
-Write-Host "Extension: $(Join-Path $sourceRoot 'extension')"
-Write-Host "Desktop companion: $hostTarget"
-Write-Host 'Health: http://127.0.0.1:32191/health'
-Write-Host "Job log: $(Join-Path $installRoot 'last-job.jsonl')"
+Write-Host "Vault Skill: $vaultSkill"
+Write-Host "Obsidian plugin: $pluginTarget"
+Write-Host "Chrome extension: $(Join-Path $sourceRoot 'extension')"
+Write-Host 'Legacy desktop companion: absent'

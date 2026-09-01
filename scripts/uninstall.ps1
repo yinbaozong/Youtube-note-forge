@@ -1,36 +1,78 @@
 [CmdletBinding(SupportsShouldProcess)]
-param()
+param(
+    [string]$Vault = (Join-Path $HOME 'Documents\Obsidian Vault')
+)
 
 $ErrorActionPreference = 'Stop'
-$installRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
-$hostTarget = Join-Path $installRoot 'youtube_reader_host.py'
-$legacyRegistryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host'
+$pluginId = 'youtube-note-reader'
+$pluginsRoot = Join-Path $Vault '.obsidian\plugins'
+$pluginTarget = Join-Path $pluginsRoot $pluginId
+$legacyRoot = Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'
+$legacyHost = Join-Path $legacyRoot 'youtube_reader_host.py'
+$legacyExe = Join-Path $legacyRoot 'youtube-reader-host.exe'
 $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'YouTubeNoteReader'
+$nativeHostPaths = @(
+    'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.youtube_note_reader.host',
+    'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.youtube_note_reader.host'
+)
 
-if ($PSCmdlet.ShouldProcess($hostTarget, 'Stop YouTube Reader desktop companion')) {
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($hostTarget, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+function Get-NormalizedPath([string]$Path) {
+    return [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
 }
-if (Test-Path $legacyRegistryPath) {
-    if ($PSCmdlet.ShouldProcess($legacyRegistryPath, 'Remove legacy Native Messaging registration')) {
-        Remove-Item -LiteralPath $legacyRegistryPath -Recurse -Force
+
+function Assert-SafeDirectory([string]$Path, [string]$Expected, [string]$Parent) {
+    $actualPath = Get-NormalizedPath $Path
+    $expectedPath = Get-NormalizedPath $Expected
+    $parentPath = Get-NormalizedPath $Parent
+    if (-not [string]::Equals($actualPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove unexpected path: $actualPath"
+    }
+    if (-not $actualPath.StartsWith($parentPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove path outside expected parent: $actualPath"
+    }
+    if (Test-Path -LiteralPath $actualPath) {
+        $item = Get-Item -LiteralPath $actualPath -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to recursively remove a reparse point: $actualPath"
+        }
     }
 }
+
+$processes = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ($_.CommandLine -and $_.CommandLine.IndexOf($legacyHost, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+    ($_.ExecutablePath -and [string]::Equals((Get-NormalizedPath $_.ExecutablePath), (Get-NormalizedPath $legacyExe), [StringComparison]::OrdinalIgnoreCase))
+}
+foreach ($process in $processes) {
+    if ($PSCmdlet.ShouldProcess("PID $($process.ProcessId)", 'Stop legacy YouTube Reader process')) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if (Get-ItemProperty -Path $runPath -Name $runName -ErrorAction SilentlyContinue) {
-    if ($PSCmdlet.ShouldProcess($runPath, 'Remove desktop companion startup registration')) {
+    if ($PSCmdlet.ShouldProcess("$runPath\$runName", 'Remove legacy startup registration')) {
         Remove-ItemProperty -Path $runPath -Name $runName -Force
     }
 }
-if (Test-Path -LiteralPath $installRoot) {
-    if ($PSCmdlet.ShouldProcess($installRoot, 'Remove YouTube Reader Native Host')) {
-        $resolved = (Resolve-Path -LiteralPath $installRoot).Path
-        $expected = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader'))
-        if ($resolved -ne $expected) { throw "Refusing to remove unexpected path: $resolved" }
-        Remove-Item -LiteralPath $resolved -Recurse -Force
+foreach ($registryPath in $nativeHostPaths) {
+    if ((Test-Path -LiteralPath $registryPath) -and $PSCmdlet.ShouldProcess($registryPath, 'Remove legacy Native Messaging registration')) {
+        Remove-Item -LiteralPath $registryPath -Recurse -Force
     }
 }
 
-Write-Host 'Desktop companion removed. Remove YouTube 阅读器 manually from chrome://extensions.'
-Write-Host 'Cookies, notes, OpenCode credentials, and youtube-transcript Skill were preserved.'
+if (Test-Path -LiteralPath $legacyRoot) {
+    Assert-SafeDirectory $legacyRoot (Join-Path $env:LOCALAPPDATA 'YouTubeNoteReader') $env:LOCALAPPDATA
+    if ($PSCmdlet.ShouldProcess($legacyRoot, 'Remove legacy YouTube Reader runtime')) {
+        Remove-Item -LiteralPath $legacyRoot -Recurse -Force
+    }
+}
+if (Test-Path -LiteralPath $pluginTarget) {
+    Assert-SafeDirectory $pluginTarget (Join-Path $pluginsRoot $pluginId) $pluginsRoot
+    if ($PSCmdlet.ShouldProcess($pluginTarget, 'Remove installed Obsidian plugin')) {
+        Remove-Item -LiteralPath $pluginTarget -Recurse -Force
+    }
+}
+
+Write-Host 'YouTube Note Reader Obsidian plugin and legacy desktop runtime were removed.'
+Write-Host 'The Chrome extension can be removed manually from chrome://extensions.'
+Write-Host 'Skill files, cookies, generated notes, images, and SRT files were preserved.'

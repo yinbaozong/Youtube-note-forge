@@ -1,5 +1,5 @@
 ---
-description: Execute the youtube-transcript v3.4.1 fixed video-to-note workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
+description: Execute the optional youtube-transcript v4.0.0 OpenCode compatibility workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
 mode: primary
 permission:
   read: allow

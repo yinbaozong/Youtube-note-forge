@@ -474,11 +474,37 @@ def download_subtitle(runner: YtDlp, url: str, metadata: dict, choice: SubtitleC
         output_template,
         url,
     ]
-    result = runner.run(args, purpose=f"download {choice.lang} subtitles", check=False)
+    result = runner.run(args, purpose=f"download {choice.lang} subtitles", check=False, timeout=45)
     if result.returncode != 0:
         return None, result.stderr
     files = find_vtt_files(tmp_dir, metadata.get("id", ""))
     return (files[0], "") if files else (None, "yt-dlp reported success but no .vtt subtitle file was created")
+
+
+def transcript_unavailable_error(choice: SubtitleChoice | None, subtitle_error: str) -> PipelineError:
+    """Preserve the difference between absent subtitles and a failed download/parse."""
+    if choice and subtitle_error.strip():
+        detail = re.sub(r"https?://\S+", "[URL]", subtitle_error.strip())
+        detail = re.sub(r"\s+", " ", detail)[:300]
+        return PipelineError(
+            "SUBTITLE_DOWNLOAD_FAILED",
+            "transcript",
+            f"检测到 {choice.lang} {choice.source} 字幕，但字幕下载失败：{detail}",
+            action="请稍后重试；如接受下载音频和更长耗时，可在本次任务中明确允许 ASR。",
+        )
+    if choice:
+        return PipelineError(
+            "SUBTITLE_PARSE_FAILED",
+            "transcript",
+            f"已下载 {choice.lang} {choice.source} 字幕，但没有解析出可用文本。",
+            action="请稍后重试；如接受下载音频和更长耗时，可在本次任务中明确允许 ASR。",
+        )
+    return PipelineError(
+        "SUBTITLE_UNAVAILABLE",
+        "transcript",
+        "该视频没有可用字幕，且未明确允许 ASR。",
+        action="如接受下载音频和更长耗时，请在本次任务中明确允许 ASR。",
+    )
 
 
 def clean_vtt_text(line: str) -> str:
@@ -1606,6 +1632,7 @@ def main(argv: list[str] | None = None) -> int:
         transcript_source = ""
         transcript_language = ""
         warnings: list[str] = []
+        subtitle_error = ""
 
         choice = None if args.force_asr else choose_subtitle(metadata, args.langs)
         if choice:
@@ -1621,12 +1648,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if not transcript_entries:
             if not args.allow_asr:
-                raise PipelineError(
-                    "SUBTITLE_UNAVAILABLE",
-                    "transcript",
-                    "没有可用字幕，且未明确允许 ASR。",
-                    action="如接受下载音频和更长耗时，请明确使用 --allow-asr。",
-                )
+                raise transcript_unavailable_error(choice, subtitle_error)
             print("No usable subtitles found; downloading audio for ASR fallback...")
             audio_path = download_audio(runner, args.url, tmp_dir)
             transcript_entries, transcript_source = transcribe_audio(audio_path, args.asr_model)
