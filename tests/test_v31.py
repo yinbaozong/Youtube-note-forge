@@ -237,7 +237,7 @@ class QualityGateV31Tests(unittest.TestCase):
             vault = Path(raw)
             note = vault / "中文标题 - English Title.md"
             note.write_text(
-                "---\nskill_version: 4.0.0\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
+                "---\nskill_version: 4.0.1\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
                 "## 一句话摘要\n\n这是摘要。\n\n"
                 "## 核心知识点速览\n\n- 知识点。\n\n"
                 "## 详细内容总结\n\n### 第一部分\n\n内容很少。\n\n"
@@ -258,7 +258,7 @@ class ChromeObsidianContractTests(unittest.TestCase):
     def test_extension_targets_obsidian_plugin_without_native_messaging(self) -> None:
         manifest = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
         worker = (ROOT / "extension" / "service_worker.js").read_text(encoding="utf-8")
-        self.assertEqual(manifest["version"], "4.0.0")
+        self.assertEqual(manifest["version"], "4.0.1")
         self.assertNotIn("nativeMessaging", manifest["permissions"])
         self.assertIn("cookies", manifest["permissions"])
         self.assertIn("http://127.0.0.1:32191/*", manifest["host_permissions"])
@@ -319,6 +319,8 @@ class ChromeObsidianContractTests(unittest.TestCase):
         self.assertIn("if (-not $pluginBuildReady)", installer)
         self.assertIn("community-plugins.json", installer)
         self.assertIn("YouTubeNoteReader", installer)
+        self.assertIn("$parsedPlugins", verifier)
+        self.assertIn("ForEach-Object { [string]$_ }", verifier)
         self.assertNotIn("opencode run", installer.lower())
         self.assertIn("Legacy desktop companion: absent", verifier)
         self.assertIn("http://127.0.0.1:32191/*", verifier)
@@ -332,18 +334,39 @@ class ChromeObsidianContractTests(unittest.TestCase):
             for path in (ROOT / "obsidian-plugin" / "src").glob("*.ts")
         )
         self.assertEqual(manifest["id"], "youtube-note-reader")
-        self.assertEqual(manifest["version"], "4.0.0")
+        self.assertEqual(manifest["version"], "4.0.1")
         self.assertNotIn("youtube_reader_host", sources)
         self.assertNotIn("opencode run", sources.lower())
         http_server = (ROOT / "obsidian-plugin" / "src" / "http-server.ts").read_text(encoding="utf-8")
-        self.assertIn("chrome-extension://obcfabljhffpdbcaebficbfpdpinnhgh", http_server)
-        self.assertNotIn('origin.startsWith("chrome-extension://")', http_server)
+        origin = (ROOT / "obsidian-plugin" / "src" / "origin.ts").read_text(encoding="utf-8")
+        self.assertIn("isAllowedExtensionOrigin", http_server)
+        self.assertIn("[a-p]{32}", origin)
+        self.assertNotIn("obcfabljhffpdbcaebficbfpdpinnhgh", http_server)
 
     def test_api_key_is_saved_by_an_explicit_button(self) -> None:
         settings = (ROOT / "obsidian-plugin" / "src" / "settings.ts").read_text(encoding="utf-8")
         self.assertIn('.setButtonText("保存 API Key")', settings)
+        self.assertIn('.setButtonText("验证 API Key")', settings)
+        self.assertIn("validateApiKey", settings)
         self.assertIn("let pendingApiKey", settings)
         self.assertNotIn('text.setValue("");\n          });', settings)
+
+    def test_browser_connection_page_has_explicit_connection_and_key_status(self) -> None:
+        options = (ROOT / "extension" / "options.html").read_text(encoding="utf-8")
+        script = (ROOT / "extension" / "options.js").read_text(encoding="utf-8")
+        worker = (ROOT / "extension" / "service_worker.js").read_text(encoding="utf-8")
+        jobs = (ROOT / "obsidian-plugin" / "src" / "job-manager.ts").read_text(encoding="utf-8")
+        styles = (ROOT / "extension" / "options.css").read_text(encoding="utf-8")
+        self.assertIn('id="apiKeyStatus"', options)
+        self.assertIn('id="validateApiKey"', options)
+        self.assertIn("connection-card connected", script)
+        self.assertIn("connection-card disconnected", script)
+        self.assertIn("api_key_configured", script)
+        self.assertIn('type: "validate_api_key"', script)
+        self.assertIn('message.type === "validate_api_key"', worker)
+        self.assertIn('type === "validate_api_key"', jobs)
+        self.assertIn(".connection-card.connected", styles)
+        self.assertIn(".connection-card.disconnected", styles)
 
 
 if __name__ == "__main__":

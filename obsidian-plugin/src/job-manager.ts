@@ -73,6 +73,7 @@ export interface JobManagerOptions {
   persist: (state: JobState) => Promise<void>;
   openNote: (absolutePath: string) => Promise<void>;
   openSettings: () => void;
+  validateApiKey: () => Promise<string>;
   initialState?: JobState;
 }
 
@@ -138,6 +139,14 @@ export class JobManager {
       this.options.openSettings();
       return { type: "settings_opened", request_id: String(payload.request_id || "") };
     }
+    if (type === "validate_api_key") {
+      const message = await this.options.validateApiKey();
+      return {
+        type: "api_key_valid",
+        request_id: String(payload.request_id || ""),
+        message,
+      };
+    }
     if (type === "get_settings") {
       const settings = this.options.getSettings();
       return {
@@ -147,7 +156,7 @@ export class JobManager {
           ...settings,
           current_model: settings.model,
           current_vault: this.options.vaultBasePath,
-          plugin_version: "4.0.0",
+          plugin_version: "4.0.1",
           api_key_configured: hasApiKey(this.options.app),
         },
       };

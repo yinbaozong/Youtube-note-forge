@@ -21,6 +21,21 @@ h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
   border-radius: 6px;
   background: #fafbfc;
 }
+.connection-card.connected {
+  border-color: #65a77e;
+  background: #f0f8f3;
+  box-shadow: inset 4px 0 0 #198754;
+}
+.connection-card.disconnected {
+  border-color: #d78a8a;
+  background: #fff3f3;
+  box-shadow: inset 4px 0 0 #c73535;
+}
+.connection-card.checking {
+  border-color: #d5b45d;
+  background: #fffaf0;
+  box-shadow: inset 4px 0 0 #d99a00;
+}
 .connection-title { display: flex; align-items: center; gap: 10px; }
 #indicator { width: 10px; height: 10px; border-radius: 50%; background: #d99a00; }
 #indicator.ok { background: #198754; }
@@ -29,6 +44,9 @@ dl { margin: 18px 0 0; }
 dl div { display: grid; grid-template-columns: 100px 1fr; gap: 14px; padding: 10px 0; border-top: 1px solid #e4e8ed; }
 dt { color: #657180; }
 dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+.value-ok, .status-ok { color: #126a40; }
+.value-error, .status-error { color: #a82424; }
+.status-warning { color: #8a6200; }
 .actions { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
 button {
   min-height: 40px;

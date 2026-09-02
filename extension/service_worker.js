@@ -375,6 +375,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return state;
     }
     if (message.type === "get_settings") return getPluginSettings();
+    if (message.type === "validate_api_key") {
+      return pluginRequest({ type: "validate_api_key", request_id: crypto.randomUUID() });
+    }
     if (message.type === "open_obsidian_settings") {
       return pluginRequest({ type: "open_settings", request_id: crypto.randomUUID() });
     }

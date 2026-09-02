@@ -2,7 +2,7 @@
 
 把 YouTube、Bilibili 等长视频整理成适合 Obsidian 长期学习的中文笔记，并保留 SRT、封面和与正文对应的关键截图。
 
-当前版本：`4.0.0`
+当前版本：`4.0.1`
 
 ## v4 架构
 
@@ -46,8 +46,8 @@ Chrome 当前视频页
 
 | 方式 | 发布包 | 适合人群 | 依赖 |
 | --- | --- | --- | --- |
-| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.0.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
-| 仅 Skill | `youtube-transcript-skill-v4.0.0.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
+| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.1.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
+| 仅 Skill | `youtube-transcript-skill-v4.0.1.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
 
 朋友使用完整阅读器时不需要安装 OpenCode，但需要使用自己的模型 API Key。
 
@@ -89,8 +89,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Vault "C:\Users\
 ### 3. 启用 Obsidian 插件
 
 1. 打开目标 Vault。
-2. 重载或重启一次 Obsidian；安装脚本已自动启用 `YouTube Note Reader`。
-3. 进入“设置 -> YouTube Note Reader”。
+2. 重载或完全退出后重启一次 Obsidian；正在运行的 Obsidian 不会自动加载刚复制进去的 `main.js`。
+3. 进入“设置 -> 第三方插件”，确认 `YouTube Note Reader` 已启用；若未启用，关闭“安全模式”后手动打开开关。
+4. 在左侧设置列表进入 `YouTube Note Reader`。
 
 插件目录为：
 
@@ -111,6 +112,7 @@ Skill 目录为：
 - API Base：OpenAI-compatible 地址，例如 `https://api.openai.com/v1`。
 - Model：服务商要求的完整模型名。
 - API Key：保存到 Obsidian SecretStorage，不写入 Chrome 扩展或发布包。
+- 验证 API Key：保存后点击一次，插件会向当前 API Base 和模型发送最小请求并显示成功或具体错误。
 - Python：通常填写 `python`。
 - Skill 目录：默认指向当前 Vault 内安装的 Skill。
 - 输出目录：默认 `YouTube video`。
@@ -127,6 +129,8 @@ Skill 目录为：
 5. 固定工具栏中的“YouTube 阅读器”图标。
 
 Chrome 扩展通过 `http://127.0.0.1:32191` 与当前已打开的 Obsidian 插件通信，不再使用 Native Messaging。
+
+打开扩展的“连接与设置”页后：绿色表示已连接当前 Obsidian Vault，红色表示未连接并显示处理建议。该页面也会显示 API Key 是否已保存，并可直接点击“验证 API Key”；验证请求由 Obsidian 发出，Chrome 无法读取 Key。
 
 ## 使用方法
 
@@ -169,6 +173,8 @@ Chrome 扩展通过 `http://127.0.0.1:32191` 与当前已打开的 Obsidian 插�
 2. 当前 Vault 已启用 `YouTube Note Reader`。
 3. 本机端口 `32191` 没有被其他程序占用。
 4. Chrome 扩展是当前 `extension` 目录，且已在扩展页点击“重新加载”。
+
+`4.0.0` 曾把一个 Chrome 扩展 ID 写死，导致从不同目录加载的扩展显示 `Extension origin is not allowed.`。`4.0.1` 已改为接受任意格式合法的 Chrome 扩展来源，同时服务仍只监听 `127.0.0.1`；升级后必须同时重载 Obsidian 插件和 Chrome 扩展。
 
 独立桌面伴侣已废弃，不需要运行 `restart_companion.ps1`。
 

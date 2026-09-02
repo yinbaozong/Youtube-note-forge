@@ -2,9 +2,11 @@ import { FileSystemAdapter, Notice, Plugin, TFile } from "obsidian";
 
 import { PluginHttpServer } from "./http-server";
 import { JobManager, type JobState } from "./job-manager";
+import { probeApiCredentials } from "./model-client";
 import {
   YouTubeReaderSettingTab,
   defaultSettings,
+  getApiKey,
   type YouTubeReaderSettings,
 } from "./settings";
 
@@ -44,6 +46,7 @@ export default class YouTubeNoteReaderPlugin extends Plugin {
       },
       openNote: (note) => this.openNote(note),
       openSettings: () => this.openSettings(),
+      validateApiKey: () => this.validateApiKey(),
       initialState: this.data.latestJob,
     });
     await this.jobs.markInterruptedOnLoad();
@@ -68,6 +71,15 @@ export default class YouTubeNoteReaderPlugin extends Plugin {
   async saveSettings(): Promise<void> {
     this.data.settings = this.settings;
     await this.persistData();
+  }
+
+  async validateApiKey(): Promise<string> {
+    return probeApiCredentials({
+      apiBase: this.settings.apiBase,
+      apiKey: getApiKey(this.app),
+      model: this.settings.model,
+      timeoutMs: 20_000,
+    });
   }
 
   private async persistData(): Promise<void> {

@@ -118,7 +118,8 @@
       model: rpc.current_model || rpc.model || health.current_model || health.model || "未配置",
       vault: rpc.current_vault || rpc.vault || rpc.default_vault
         || health.current_vault || health.vault || health.default_vault || "未配置",
-      plugin_version: rpc.plugin_version || rpc.version || health.plugin_version || health.version || "未知"
+      plugin_version: rpc.plugin_version || rpc.version || health.plugin_version || health.version || "未知",
+      api_key_configured: rpc.api_key_configured === true
     };
   }
 

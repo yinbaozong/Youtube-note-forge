@@ -10,7 +10,7 @@
     <main>
       <h1>YouTube 阅读器连接</h1>
       <p class="intro">模型、API Key 和 Vault 均由 Obsidian 的 YouTube Note Reader 插件统一管理。</p>
-      <section class="connection-card" aria-live="polite">
+      <section id="connectionCard" class="connection-card checking" aria-live="polite">
         <div class="connection-title">
           <span id="indicator"></span>
           <strong id="connection">正在检测 Obsidian 插件…</strong>
@@ -19,10 +19,12 @@
           <div><dt>当前模型</dt><dd id="model">读取中</dd></div>
           <div><dt>当前 Vault</dt><dd id="vault">读取中</dd></div>
           <div><dt>插件版本</dt><dd id="pluginVersion">读取中</dd></div>
+          <div><dt>API Key</dt><dd id="apiKeyStatus">读取中</dd></div>
         </dl>
       </section>
       <div class="actions">
         <button id="openSettings">打开 Obsidian 设置</button>
+        <button id="validateApiKey" class="secondary" type="button">验证 API Key</button>
         <button id="retry" class="secondary" type="button">重新检测</button>
       </div>
       <p id="status"></p>

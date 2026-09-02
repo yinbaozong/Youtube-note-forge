@@ -48,6 +48,7 @@ export interface SettingsController {
   app: App;
   settings: YouTubeReaderSettings;
   saveSettings(): Promise<void>;
+  validateApiKey(): Promise<string>;
 }
 
 export class YouTubeReaderSettingTab extends PluginSettingTab {
@@ -115,6 +116,24 @@ export class YouTubeReaderSettingTab extends PluginSettingTab {
           pendingApiKey = "";
           new Notice("YouTube Note Reader API Key 已保存。");
           this.display();
+        }));
+
+    new Setting(containerEl)
+      .setName("验证模型连接")
+      .setDesc("使用已保存的 API Key 和当前模型发送一次最小请求；Key 不会显示或写入日志。")
+      .addButton((button) => button
+        .setButtonText("验证 API Key")
+        .setDisabled(!supported || !configured)
+        .onClick(async () => {
+          button.setDisabled(true).setButtonText("验证中…");
+          try {
+            const message = await this.controller.validateApiKey();
+            new Notice(message, 6_000);
+          } catch (error) {
+            new Notice(String((error as Error).message || error), 10_000);
+          } finally {
+            button.setDisabled(false).setButtonText("验证 API Key");
+          }
         }));
 
     new Setting(containerEl)

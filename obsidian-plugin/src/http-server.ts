@@ -1,11 +1,11 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 
 import type { JobManager } from "./job-manager";
+import { isAllowedExtensionOrigin } from "./origin";
 
 const HOST = "127.0.0.1";
 const PORT = 32191;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
-const ALLOWED_EXTENSION_ORIGIN = "chrome-extension://obcfabljhffpdbcaebficbfpdpinnhgh";
 
 export class PluginHttpServer {
   private server: http.Server | null = null;
@@ -31,7 +31,7 @@ export class PluginHttpServer {
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${HOST}:${PORT}`);
     const origin = String(request.headers.origin || "");
-    const chromeOrigin = origin === ALLOWED_EXTENSION_ORIGIN;
+    const chromeOrigin = isAllowedExtensionOrigin(origin);
     const emptyHealthProbe = !origin && request.method === "GET" && url.pathname === "/health";
     if (!chromeOrigin && !emptyHealthProbe) {
       this.send(response, 403, { type: "error", status: "error", message: "Extension origin is not allowed." }, origin);
@@ -44,7 +44,7 @@ export class PluginHttpServer {
     }
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        this.send(response, 200, { status: "ok", host: "youtube-note-reader", version: "4.0.0" }, origin);
+        this.send(response, 200, { status: "ok", host: "youtube-note-reader", version: "4.0.1" }, origin);
         return;
       }
       if (request.method === "GET" && url.pathname === "/active") {
@@ -93,7 +93,7 @@ function corsHeaders(origin: string): Record<string, string> {
     "Access-Control-Max-Age": "600",
     Vary: "Origin",
   };
-  if (origin === ALLOWED_EXTENSION_ORIGIN) headers["Access-Control-Allow-Origin"] = origin;
+  if (isAllowedExtensionOrigin(origin)) headers["Access-Control-Allow-Origin"] = origin;
   return headers;
 }
 

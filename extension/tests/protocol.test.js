@@ -72,17 +72,29 @@ test("backend resume flag survives status updates", () => {
 test("plugin settings prefer RPC values and fall back to health", () => {
   assert.deepEqual(
     normalizePluginSettings(
-      { model: "health/model", default_vault: "C:\\Vault", version: "4.0.0" },
-      { current_model: "rpc/model" }
+      { model: "health/model", default_vault: "C:\\Vault", version: "4.0.1" },
+      { current_model: "rpc/model", api_key_configured: true }
     ),
-    { connected: true, model: "rpc/model", vault: "C:\\Vault", plugin_version: "4.0.0" }
+    {
+      connected: true,
+      model: "rpc/model",
+      vault: "C:\\Vault",
+      plugin_version: "4.0.1",
+      api_key_configured: true
+    }
   );
   assert.deepEqual(
     normalizePluginSettings(
-      { version: "4.0.0" },
+      { version: "4.0.1" },
       { settings: { model: "nested/model", vault: "D:\\Notes" } }
     ),
-    { connected: true, model: "nested/model", vault: "D:\\Notes", plugin_version: "4.0.0" }
+    {
+      connected: true,
+      model: "nested/model",
+      vault: "D:\\Notes",
+      plugin_version: "4.0.1",
+      api_key_configured: false
+    }
   );
 });
 

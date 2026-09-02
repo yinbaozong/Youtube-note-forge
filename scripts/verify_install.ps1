@@ -70,7 +70,8 @@ foreach ($name in $pluginFiles) {
 if (-not (Test-Path -LiteralPath $communityPluginsPath -PathType Leaf)) {
     throw "Obsidian community plugin list is missing: $communityPluginsPath"
 }
-$enabledPlugins = @(Get-Content -Raw -Encoding UTF8 -LiteralPath $communityPluginsPath | ConvertFrom-Json)
+$parsedPlugins = Get-Content -Raw -Encoding UTF8 -LiteralPath $communityPluginsPath | ConvertFrom-Json
+$enabledPlugins = @($parsedPlugins | ForEach-Object { [string]$_ })
 if ($enabledPlugins -notcontains $pluginId) { throw 'YouTube Note Reader is installed but not enabled in Obsidian.' }
 
 $sourceManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $pluginSource 'manifest.json') | ConvertFrom-Json

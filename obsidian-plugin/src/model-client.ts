@@ -1,5 +1,10 @@
 import { requestUrl } from "obsidian";
 
+import {
+  validateApiCredentials,
+  type CredentialValidationOptions,
+} from "./credential-validation";
+
 export interface ChatJsonOptions {
   apiBase: string;
   apiKey: string;
@@ -38,6 +43,13 @@ export async function requestChatJson<T>(options: ChatJsonOptions): Promise<T> {
     throw new Error("MODEL_RESPONSE_INVALID: 模型没有返回可解析的 JSON 内容。");
   }
   return parseJsonObject<T>(content);
+}
+
+export function probeApiCredentials(options: CredentialValidationOptions): Promise<string> {
+  return validateApiCredentials(options, async (request) => {
+    const response = await requestUrl(request);
+    return { status: response.status, json: response.json, text: response.text };
+  });
 }
 
 export function parseJsonObject<T>(content: string): T {
