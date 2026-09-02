@@ -39,6 +39,17 @@
     return ASR_RETRYABLE_CODES.includes(code || "");
   }
 
+  function isConnectionError(state) {
+    return Boolean(
+      state
+      && state.status === "error"
+      && (
+        state.code === CONNECTION_ERROR_CODE
+        || /Extension origin is not allowed\.?/i.test(state.message || "")
+      )
+    );
+  }
+
   function buildStartPayload({ requestId, url, title, cookies, resume = false, allowAsr = false }) {
     return {
       type: "start_job",
@@ -131,6 +142,7 @@
     buildStartPayload,
     createInitialState,
     isAsrRetryableCode,
+    isConnectionError,
     normalizePluginSettings,
     shouldOfferAsr,
     statusPatch

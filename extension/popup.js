@@ -15,7 +15,7 @@ const openNote = document.getElementById("openNote");
 const copyPath = document.getElementById("copyPath");
 const copyPhotosPath = document.getElementById("copyPhotosPath");
 const retryConnection = document.getElementById("retryConnection");
-const { shouldOfferAsr } = YouTubeReaderProtocol;
+const { isConnectionError, shouldOfferAsr } = YouTubeReaderProtocol;
 let currentNotePath = "";
 let currentPhotosPath = "";
 let currentVideoUrl = "";
@@ -103,10 +103,8 @@ function render(state) {
   openNote.hidden = !state.note_path;
   copyPath.hidden = !state.note_path;
   copyPhotosPath.hidden = !state.screenshot_dir;
-  retryConnection.hidden = !(
-    state.status === "error"
-    && (state.code === "OBSIDIAN_PLUGIN_UNAVAILABLE" || /Obsidian|127\.0\.0\.1:32191/.test(state.message || ""))
-  );
+  retryConnection.hidden = !(isConnectionError(state)
+    || (state.status === "error" && /Obsidian|127\.0\.0\.1:32191/.test(state.message || "")));
   currentNotePath = state.note_path || "";
   currentPhotosPath = state.screenshot_dir || "";
   currentVideoUrl = state.video_url || "";

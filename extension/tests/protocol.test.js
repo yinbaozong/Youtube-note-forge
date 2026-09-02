@@ -4,6 +4,7 @@ const {
   CONNECTION_ERROR_MESSAGE,
   buildStartPayload,
   createInitialState,
+  isConnectionError,
   normalizePluginSettings,
   shouldOfferAsr,
   statusPatch
@@ -72,27 +73,27 @@ test("backend resume flag survives status updates", () => {
 test("plugin settings prefer RPC values and fall back to health", () => {
   assert.deepEqual(
     normalizePluginSettings(
-      { model: "health/model", default_vault: "C:\\Vault", version: "4.0.1" },
+      { model: "health/model", default_vault: "C:\\Vault", version: "4.0.2" },
       { current_model: "rpc/model", api_key_configured: true }
     ),
     {
       connected: true,
       model: "rpc/model",
       vault: "C:\\Vault",
-      plugin_version: "4.0.1",
+      plugin_version: "4.0.2",
       api_key_configured: true
     }
   );
   assert.deepEqual(
     normalizePluginSettings(
-      { version: "4.0.1" },
+      { version: "4.0.2" },
       { settings: { model: "nested/model", vault: "D:\\Notes" } }
     ),
     {
       connected: true,
       model: "nested/model",
       vault: "D:\\Notes",
-      plugin_version: "4.0.1",
+      plugin_version: "4.0.2",
       api_key_configured: false
     }
   );
@@ -100,4 +101,11 @@ test("plugin settings prefer RPC values and fall back to health", () => {
 
 test("connection failure copy is stable and actionable", () => {
   assert.equal(CONNECTION_ERROR_MESSAGE, "请先打开 Obsidian，并启用 YouTube Note Reader 插件。");
+});
+
+test("recognizes stale origin failures without hiding pipeline errors", () => {
+  assert.equal(isConnectionError({ status: "error", code: "OBSIDIAN_PLUGIN_UNAVAILABLE" }), true);
+  assert.equal(isConnectionError({ status: "error", message: "Extension origin is not allowed." }), true);
+  assert.equal(isConnectionError({ status: "error", code: "API_KEY_REJECTED" }), false);
+  assert.equal(isConnectionError({ status: "ok", message: "Extension origin is not allowed." }), false);
 });

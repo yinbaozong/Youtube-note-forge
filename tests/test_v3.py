@@ -53,12 +53,12 @@ class V3ContractTests(unittest.TestCase):
         self.assertEqual(runner.timeout, 45)
 
     def test_version_is_single_source(self) -> None:
-        self.assertEqual(VERSION, "4.0.1")
-        self.assertEqual(version_text(), "youtube-transcript 4.0.1")
+        self.assertEqual(VERSION, "4.0.2")
+        self.assertEqual(version_text(), "youtube-transcript 4.0.2")
 
     def test_version_report_contains_core_hashes(self) -> None:
         report = version_report()
-        self.assertEqual(report["skill_version"], "4.0.1")
+        self.assertEqual(report["skill_version"], "4.0.2")
         self.assertIn("scripts/extract_frames.py", report["core_sha256"])
 
     def test_frame_plan_accepts_utf8_bom(self) -> None:

@@ -7,6 +7,7 @@ const {
   buildStartPayload,
   createInitialState,
   isAsrRetryableCode,
+  isConnectionError,
   normalizePluginSettings,
   statusPatch
 } = YouTubeReaderProtocol;
@@ -351,6 +352,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             ) {
               await updateState(applyStatus(latest));
               await updateState({ request_id: latest.request_id });
+            } else if (isConnectionError(state)) {
+              await updateState(createInitialState({ message: "连接已恢复，可以开始新任务" }));
             }
           }
         } catch (_error) {

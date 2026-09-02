@@ -237,7 +237,7 @@ class QualityGateV31Tests(unittest.TestCase):
             vault = Path(raw)
             note = vault / "中文标题 - English Title.md"
             note.write_text(
-                "---\nskill_version: 4.0.1\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
+                "---\nskill_version: 4.0.2\nquality_profile_version: 1\nduration: 00:20:00\n---\n\n"
                 "## 一句话摘要\n\n这是摘要。\n\n"
                 "## 核心知识点速览\n\n- 知识点。\n\n"
                 "## 详细内容总结\n\n### 第一部分\n\n内容很少。\n\n"
@@ -258,7 +258,7 @@ class ChromeObsidianContractTests(unittest.TestCase):
     def test_extension_targets_obsidian_plugin_without_native_messaging(self) -> None:
         manifest = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
         worker = (ROOT / "extension" / "service_worker.js").read_text(encoding="utf-8")
-        self.assertEqual(manifest["version"], "4.0.1")
+        self.assertEqual(manifest["version"], "4.0.2")
         self.assertNotIn("nativeMessaging", manifest["permissions"])
         self.assertIn("cookies", manifest["permissions"])
         self.assertIn("http://127.0.0.1:32191/*", manifest["host_permissions"])
@@ -309,6 +309,8 @@ class ChromeObsidianContractTests(unittest.TestCase):
         self.assertIn("TASK_INTERRUPTED", worker)
         self.assertIn('type: "clear_job"', worker)
         self.assertIn('type === "clear_job"', jobs)
+        self.assertIn("isConnectionError(state)", worker)
+        self.assertIn("连接已恢复", worker)
 
     def test_full_installer_uses_obsidian_and_removes_legacy_runtime(self) -> None:
         installer = (ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -334,13 +336,14 @@ class ChromeObsidianContractTests(unittest.TestCase):
             for path in (ROOT / "obsidian-plugin" / "src").glob("*.ts")
         )
         self.assertEqual(manifest["id"], "youtube-note-reader")
-        self.assertEqual(manifest["version"], "4.0.1")
+        self.assertEqual(manifest["version"], "4.0.2")
         self.assertNotIn("youtube_reader_host", sources)
         self.assertNotIn("opencode run", sources.lower())
         http_server = (ROOT / "obsidian-plugin" / "src" / "http-server.ts").read_text(encoding="utf-8")
         origin = (ROOT / "obsidian-plugin" / "src" / "origin.ts").read_text(encoding="utf-8")
         self.assertIn("isAllowedExtensionOrigin", http_server)
-        self.assertIn("[a-p]{32}", origin)
+        self.assertIn('parsed.protocol === "chrome-extension:"', origin)
+        self.assertIn("^[a-z0-9-]+$", origin)
         self.assertNotIn("obcfabljhffpdbcaebficbfpdpinnhgh", http_server)
 
     def test_api_key_is_saved_by_an_explicit_button(self) -> None:

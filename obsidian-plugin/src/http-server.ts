@@ -44,7 +44,7 @@ export class PluginHttpServer {
     }
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        this.send(response, 200, { status: "ok", host: "youtube-note-reader", version: "4.0.1" }, origin);
+        this.send(response, 200, { status: "ok", host: "youtube-note-reader", version: "4.0.2" }, origin);
         return;
       }
       if (request.method === "GET" && url.pathname === "/active") {

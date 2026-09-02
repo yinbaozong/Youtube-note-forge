@@ -37,11 +37,11 @@ test("updates required frontmatter without dropping source metadata", () => {
 
   const updated = updateFrontmatter(source, {
     title: "从零理解 Git - Understand Git",
-    skill_version: "4.0.1",
+    skill_version: "4.0.2",
   });
 
   assert.match(updated, /^---\ntitle: "从零理解 Git - Understand Git"$/m);
-  assert.match(updated, /^skill_version: "4.0.1"$/m);
+  assert.match(updated, /^skill_version: "4.0.2"$/m);
   assert.match(updated, /^url: https:\/\/www\.youtube\.com\/watch\?v=abc$/m);
   assert.match(updated, /^channel: Example$/m);
   assert.match(updated, /## scaffold$/);
