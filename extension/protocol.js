@@ -45,9 +45,18 @@
       && state.status === "error"
       && (
         state.code === CONNECTION_ERROR_CODE
+        || state.code === "EXTENSION_CLIENT_REJECTED"
         || /Extension origin is not allowed\.?/i.test(state.message || "")
       )
     );
+  }
+
+  function buildClientIdentity(extensionId, version) {
+    if (!extensionId) throw new Error("缺少 Chrome 扩展 ID");
+    if (!/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(version || "")) {
+      throw new Error("Chrome 扩展版本无效");
+    }
+    return `${extensionId}@${version}`;
   }
 
   function buildStartPayload({ requestId, url, title, cookies, resume = false, allowAsr = false }) {
@@ -125,7 +134,7 @@
       ? settings.settings
       : settings;
     return {
-      connected: true,
+      connected: health.status === "ok" && settings.type === "settings",
       model: rpc.current_model || rpc.model || health.current_model || health.model || "未配置",
       vault: rpc.current_vault || rpc.vault || rpc.default_vault
         || health.current_vault || health.vault || health.default_vault || "未配置",
@@ -139,6 +148,7 @@
     CONNECTION_ERROR_CODE,
     CONNECTION_ERROR_MESSAGE,
     INITIAL_STATE,
+    buildClientIdentity,
     buildStartPayload,
     createInitialState,
     isAsrRetryableCode,

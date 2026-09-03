@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   CONNECTION_ERROR_MESSAGE,
+  buildClientIdentity,
   buildStartPayload,
   createInitialState,
   isConnectionError,
@@ -16,6 +17,14 @@ test("new task state clears ASR and previous output fields", () => {
   assert.equal(state.allow_asr, false);
   assert.equal(state.note_path, "");
   assert.equal(state.screenshot_dir, "");
+});
+
+test("client identity binds every local request to the running extension version", () => {
+  assert.equal(
+    buildClientIdentity("abcdefghijklmnopabcdefghijklmnop", "4.0.3"),
+    "abcdefghijklmnopabcdefghijklmnop@4.0.3"
+  );
+  assert.throws(() => buildClientIdentity("", "4.0.3"), /扩展 ID/);
 });
 
 test("start payload excludes Chrome-side model and vault configuration", () => {
@@ -73,27 +82,40 @@ test("backend resume flag survives status updates", () => {
 test("plugin settings prefer RPC values and fall back to health", () => {
   assert.deepEqual(
     normalizePluginSettings(
-      { model: "health/model", default_vault: "C:\\Vault", version: "4.0.2" },
-      { current_model: "rpc/model", api_key_configured: true }
+      { status: "ok", model: "health/model", default_vault: "C:\\Vault", version: "4.0.3" },
+      { type: "settings", current_model: "rpc/model", api_key_configured: true }
     ),
     {
       connected: true,
       model: "rpc/model",
       vault: "C:\\Vault",
-      plugin_version: "4.0.2",
+      plugin_version: "4.0.3",
       api_key_configured: true
     }
   );
   assert.deepEqual(
     normalizePluginSettings(
-      { version: "4.0.2" },
-      { settings: { model: "nested/model", vault: "D:\\Notes" } }
+      { status: "ok", version: "4.0.3" },
+      { type: "settings", settings: { model: "nested/model", vault: "D:\\Notes" } }
     ),
     {
       connected: true,
       model: "nested/model",
       vault: "D:\\Notes",
-      plugin_version: "4.0.2",
+      plugin_version: "4.0.3",
+      api_key_configured: false
+    }
+  );
+});
+
+test("health alone never reports a green connection without a successful settings RPC", () => {
+  assert.deepEqual(
+    normalizePluginSettings({ status: "ok", version: "4.0.3" }, {}),
+    {
+      connected: false,
+      model: "未配置",
+      vault: "未配置",
+      plugin_version: "4.0.3",
       api_key_configured: false
     }
   );
@@ -105,6 +127,7 @@ test("connection failure copy is stable and actionable", () => {
 
 test("recognizes stale origin failures without hiding pipeline errors", () => {
   assert.equal(isConnectionError({ status: "error", code: "OBSIDIAN_PLUGIN_UNAVAILABLE" }), true);
+  assert.equal(isConnectionError({ status: "error", code: "EXTENSION_CLIENT_REJECTED" }), true);
   assert.equal(isConnectionError({ status: "error", message: "Extension origin is not allowed." }), true);
   assert.equal(isConnectionError({ status: "error", code: "API_KEY_REJECTED" }), false);
   assert.equal(isConnectionError({ status: "ok", message: "Extension origin is not allowed." }), false);

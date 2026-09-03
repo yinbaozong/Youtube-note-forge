@@ -2,7 +2,7 @@
 
 把 YouTube、Bilibili 等长视频整理成适合 Obsidian 长期学习的中文笔记，并保留 SRT、封面和与正文对应的关键截图。
 
-当前版本：`4.0.2`
+当前版本：`4.0.3`
 
 ## v4 架构
 
@@ -46,8 +46,8 @@ Chrome 当前视频页
 
 | 方式 | 发布包 | 适合人群 | 依赖 |
 | --- | --- | --- | --- |
-| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.2.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
-| 仅 Skill | `youtube-transcript-skill-v4.0.2.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
+| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.3.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
+| 仅 Skill | `youtube-transcript-skill-v4.0.3.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
 
 朋友使用完整阅读器时不需要安装 OpenCode，但需要使用自己的模型 API Key。
 
@@ -174,7 +174,7 @@ Chrome 扩展通过 `http://127.0.0.1:32191` 与当前已打开的 Obsidian 插�
 3. 本机端口 `32191` 没有被其他程序占用。
 4. Chrome 扩展是当前 `extension` 目录，且已在扩展页点击“重新加载”。
 
-`4.0.0` 曾把一个 Chrome 扩展 ID 写死，导致从不同目录加载的扩展显示 `Extension origin is not allowed.`。`4.0.2` 按 `chrome-extension:` 协议安全解析来源，并在后端已恢复时自动清除 Chrome 会话中残留的旧连接错误；服务仍只监听 `127.0.0.1`。升级后必须同时重载 Obsidian 插件和 Chrome 扩展。
+`4.0.0` 曾把 Chrome 扩展 ID 写死，`4.0.2` 又只修正了来源解析和旧错误清理，但 Chrome 后台的部分 GET 请求可能不携带 `Origin`，因此连接页会假报绿色，而点击生成仍在 `/active` 返回 403。`4.0.3` 为每个扩展请求增加包含扩展 ID 与版本的客户端标识，并让 CORS 预检、实际请求和连接检测使用同一套规则；普通网页仍无法调用本地 RPC。升级后必须同时重载 Obsidian 插件和 Chrome 扩展。
 
 独立桌面伴侣已废弃，不需要运行 `restart_companion.ps1`。
 

@@ -4,6 +4,7 @@ const PLUGIN_BASE = "http://127.0.0.1:32191";
 const {
   CONNECTION_ERROR_CODE,
   CONNECTION_ERROR_MESSAGE,
+  buildClientIdentity,
   buildStartPayload,
   createInitialState,
   isAsrRetryableCode,
@@ -11,6 +12,9 @@ const {
   normalizePluginSettings,
   statusPatch
 } = YouTubeReaderProtocol;
+
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+const CLIENT_IDENTITY = buildClientIdentity(chrome.runtime.id, EXTENSION_VERSION);
 
 let state = createInitialState();
 let pollTimer = null;
@@ -56,8 +60,10 @@ async function updateState(patch) {
 
 async function pluginFetch(path, options = {}) {
   let response;
+  const headers = new Headers(options.headers || {});
+  headers.set("X-YouTube-Reader-Client", CLIENT_IDENTITY);
   try {
-    response = await fetch(PLUGIN_BASE + path, options);
+    response = await fetch(PLUGIN_BASE + path, { ...options, headers });
   } catch (_error) {
     throw createConnectionError();
   }
@@ -68,7 +74,12 @@ async function pluginFetch(path, options = {}) {
     throw new Error("Obsidian 插件返回了无效响应");
   }
   if (!response.ok || payload?.type === "error") {
-    const error = new Error(payload?.message || `Obsidian 插件请求失败（${response.status}）`);
+    const method = String(options.method || "GET").toUpperCase();
+    const endpoint = `${method} ${path.split("?")[0]}`;
+    const message = payload?.code === "EXTENSION_CLIENT_REJECTED"
+      ? `Chrome 扩展与 Obsidian 插件连接校验失败（${endpoint}；扩展 ${EXTENSION_VERSION}；Obsidian ${payload.plugin_version || "未知"}）。请确认两端版本一致。`
+      : payload?.message || `Obsidian 插件请求失败（${response.status}）`;
+    const error = new Error(message);
     error.code = payload?.code || "OBSIDIAN_PLUGIN_REQUEST_FAILED";
     error.can_retry_asr = payload?.can_retry_asr === true;
     throw error;
@@ -108,12 +119,7 @@ function pluginOutputDir(environment) {
 
 async function getPluginSettings() {
   const health = await pluginHealth();
-  let settings = {};
-  try {
-    settings = await pluginRequest({ type: "get_settings", request_id: crypto.randomUUID() });
-  } catch (error) {
-    if (error.code === CONNECTION_ERROR_CODE) throw error;
-  }
+  const settings = await pluginRequest({ type: "get_settings", request_id: crypto.randomUUID() });
   return normalizePluginSettings(health, settings);
 }
 
@@ -370,7 +376,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message.type === "retry_connection") {
       try {
-        await pluginHealth();
+        const connection = await getPluginSettings();
+        if (!connection.connected) throw new Error("Obsidian 真实任务接口尚未就绪。");
         await updateState(createInitialState({ message: "已连接 Obsidian 插件，可以开始新任务" }));
       } catch (error) {
         await updateState({ status: "error", stage: "failed", message: error.message, code: error.code || "" });

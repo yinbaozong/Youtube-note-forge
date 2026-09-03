@@ -156,7 +156,7 @@ export class JobManager {
           ...settings,
           current_model: settings.model,
           current_vault: this.options.vaultBasePath,
-          plugin_version: "4.0.2",
+          plugin_version: "4.0.3",
           api_key_configured: hasApiKey(this.options.app),
         },
       };
