@@ -21,11 +21,12 @@ from extract_transcript import (  # noqa: E402
     image_quality_score,
     is_transient_subtitle_failure,
     reprobe_subtitle_choice,
+    subtitle_backoff_seconds,
     summarize_ytdlp_failure,
     transcript_unavailable_error,
 )
 from validate_note import validate  # noqa: E402
-from video_common import VERSION, version_text  # noqa: E402
+from video_common import VERSION, Deadline, version_text  # noqa: E402
 from video_note import version_report  # noqa: E402
 
 
@@ -46,12 +47,13 @@ class V3ContractTests(unittest.TestCase):
     def test_subtitle_download_has_a_bounded_timeout(self) -> None:
         class FakeRunner:
             timeout: int | None = None
+            deadline = None
 
             def run(self, args, *, purpose, check, timeout=None):
                 self.timeout = timeout
                 return RunResult(args=args, returncode=1, stdout="", stderr="timeout", credential_label="")
 
-        with tempfile.TemporaryDirectory() as raw:
+        with tempfile.TemporaryDirectory() as raw, mock.patch("extract_transcript.time.sleep"):
             runner = FakeRunner()
             download_subtitle(
                 runner,  # type: ignore[arg-type]
@@ -305,6 +307,8 @@ class SubtitleDiagnosisTests(unittest.TestCase):
 
     def test_throttled_subtitle_download_is_retried_before_giving_up(self) -> None:
         class ThrottledRunner:
+            deadline = None
+
             def __init__(self) -> None:
                 self.calls = 0
 
@@ -319,7 +323,7 @@ class SubtitleDiagnosisTests(unittest.TestCase):
                 )
 
         runner = ThrottledRunner()
-        with tempfile.TemporaryDirectory() as raw, mock.patch("extract_transcript.time.sleep"):
+        with tempfile.TemporaryDirectory() as raw, mock.patch("extract_transcript.time.sleep") as sleep:
             path, error = download_subtitle(
                 runner,  # type: ignore[arg-type]
                 "https://www.youtube.com/watch?v=J1WoNuemKOg",
@@ -327,12 +331,61 @@ class SubtitleDiagnosisTests(unittest.TestCase):
                 SubtitleChoice(lang="zh-Hans", source="automatic"),
                 Path(raw),
             )
-        self.assertEqual(runner.calls, 2)
+        self.assertEqual(runner.calls, 3)
         self.assertIsNone(path)
         self.assertIn("429", error)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [15.0, 30.0])
+
+    def test_rate_limited_backoff_is_longer_than_a_network_blip(self) -> None:
+        self.assertGreaterEqual(subtitle_backoff_seconds("HTTP Error 429: Too Many Requests", 1), 15.0)
+        self.assertGreater(
+            subtitle_backoff_seconds("HTTP Error 429", 2),
+            subtitle_backoff_seconds("HTTP Error 429", 1),
+        )
+        self.assertLess(subtitle_backoff_seconds("connection reset by peer", 1), 15.0)
+
+    def test_rate_limited_failure_tells_the_user_to_wait_instead_of_using_asr(self) -> None:
+        error = transcript_unavailable_error(
+            SubtitleChoice(lang="zh-Hans", source="automatic"),
+            "ERROR: Unable to download video subtitles for 'zh-Hans': HTTP Error 429: Too Many Requests",
+        )
+        self.assertEqual(error.code, "SUBTITLE_DOWNLOAD_FAILED")
+        self.assertIn("429", str(error))
+        self.assertIn("限流", error.action)
+        self.assertNotIn("明确允许 ASR", error.action)
+
+    def test_retry_never_sleeps_past_the_pipeline_deadline(self) -> None:
+        class ExpiringRunner:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.deadline = Deadline(10)
+
+            def run(self, args, *, purpose, check, timeout=None):
+                self.calls += 1
+                return RunResult(
+                    args=args,
+                    returncode=1,
+                    stdout="",
+                    stderr="ERROR: HTTP Error 429: Too Many Requests",
+                    credential_label="",
+                )
+
+        runner = ExpiringRunner()
+        with tempfile.TemporaryDirectory() as raw, mock.patch("extract_transcript.time.sleep") as sleep:
+            download_subtitle(
+                runner,  # type: ignore[arg-type]
+                "https://www.youtube.com/watch?v=J1WoNuemKOg",
+                {"id": "J1WoNuemKOg"},
+                SubtitleChoice(lang="zh-Hans", source="automatic"),
+                Path(raw),
+            )
+        self.assertEqual(runner.calls, 1)
+        sleep.assert_not_called()
 
     def test_permanent_subtitle_failure_is_not_retried(self) -> None:
         class MissingTrackRunner:
+            deadline = None
+
             def __init__(self) -> None:
                 self.calls = 0
 
@@ -362,6 +415,8 @@ class SubtitleDiagnosisTests(unittest.TestCase):
             tmp_dir = Path(raw)
 
             class RecoveringRunner:
+                deadline = None
+
                 def __init__(self) -> None:
                     self.calls = 0
 

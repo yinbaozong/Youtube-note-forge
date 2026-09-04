@@ -36,8 +36,16 @@ from video_common import Deadline, PipelineError, VERSION, emit_progress, emit_r
 
 DEFAULT_LANGS = "zh-Hans,zh-CN,zh,zh-TW,en.*,en,ja.*,all"
 OBSIDIAN_LINK_SPECIAL_CHARS = r"[#^[\]]"
-SUBTITLE_ATTEMPTS = 2
-SUBTITLE_RETRY_BACKOFF_SECONDS = 2.0
+SUBTITLE_ATTEMPTS = 3
+# YouTube throttles the caption endpoint for far longer than a network blip, so a
+# rate-limited retry has to wait long enough to leave the throttle window.
+SUBTITLE_RETRY_BACKOFF_SECONDS = (2.0, 4.0)
+SUBTITLE_RATE_LIMIT_BACKOFF_SECONDS = (15.0, 30.0)
+RATE_LIMIT_MARKERS = ("429", "too many requests")
+RATE_LIMIT_ACTION = (
+    "YouTube 正在限流该视频的字幕接口，任务已自动等待并重试仍未通过。"
+    "请等待几分钟后再重试；短时间内连续重试会延长限流，改用 ASR 也会被同一限流拦住。"
+)
 # YouTube only returns caption tracks for some player clients. When the default
 # client set is throttled, yt-dlp downgrades to a client that reports zero
 # captions, which used to look identical to a video that genuinely has none.
@@ -433,6 +441,17 @@ def is_transient_subtitle_failure(output: str) -> bool:
     return any(marker in text for marker in TRANSIENT_SUBTITLE_MARKERS)
 
 
+def is_rate_limited(output: str) -> bool:
+    text = output.lower()
+    return any(marker in text for marker in RATE_LIMIT_MARKERS)
+
+
+def subtitle_backoff_seconds(output: str, attempt: int) -> float:
+    """Wait long enough to leave a throttle window without stalling the pipeline."""
+    schedule = SUBTITLE_RATE_LIMIT_BACKOFF_SECONDS if is_rate_limited(output) else SUBTITLE_RETRY_BACKOFF_SECONDS
+    return schedule[min(attempt, len(schedule)) - 1]
+
+
 def summarize_ytdlp_failure(raw: str, *, limit: int = 300) -> str:
     """Keep the actionable yt-dlp diagnosis instead of credential labels and warnings.
 
@@ -539,11 +558,21 @@ def download_subtitle(runner: YtDlp, url: str, metadata: dict, choice: SubtitleC
             last_error = "yt-dlp reported success but no .vtt subtitle file was created"
         else:
             last_error = result.stderr
-        # Throttling and TLS resets are the common cause here, so retry those once
+        # Throttling and TLS resets are the common cause here, so retry those
         # instead of reporting a video with captions as having none.
         if attempt >= SUBTITLE_ATTEMPTS or not is_transient_subtitle_failure(last_error):
             break
-        time.sleep(SUBTITLE_RETRY_BACKOFF_SECONDS)
+        backoff = subtitle_backoff_seconds(last_error, attempt)
+        # Sleeping past the deadline would only turn a throttle into a timeout.
+        if runner.deadline and runner.deadline.remaining() <= backoff + 15:
+            break
+        emit_progress(
+            "materials",
+            f"YouTube 暂时限流字幕接口，等待 {int(backoff)} 秒后重试。",
+            percent=18,
+        )
+        print(f"Subtitle download throttled; retrying in {int(backoff)}s", flush=True)
+        time.sleep(backoff)
     return None, last_error
 
 
@@ -568,7 +597,12 @@ def transcript_unavailable_error(choice: SubtitleChoice | None, subtitle_error: 
     """Preserve the difference between absent subtitles and a failed download/parse."""
     if choice and subtitle_error.strip():
         detail = summarize_ytdlp_failure(subtitle_error)
-        action = "请稍后重试；如接受下载音频和更长耗时，可在本次任务中明确允许 ASR。"
+        if is_rate_limited(subtitle_error):
+            # ASR would download audio from the same throttled host, so waiting is
+            # the only remedy that actually helps here.
+            action = RATE_LIMIT_ACTION
+        else:
+            action = "请稍后重试；如接受下载音频和更长耗时，可在本次任务中明确允许 ASR。"
         if IMPERSONATE_UNAVAILABLE_MARKER in subtitle_error.lower():
             action = f"{IMPERSONATE_ACTION} {action}"
         return PipelineError(
