@@ -36,6 +36,30 @@ from video_common import Deadline, PipelineError, VERSION, emit_progress, emit_r
 
 DEFAULT_LANGS = "zh-Hans,zh-CN,zh,zh-TW,en.*,en,ja.*,all"
 OBSIDIAN_LINK_SPECIAL_CHARS = r"[#^[\]]"
+SUBTITLE_ATTEMPTS = 2
+SUBTITLE_RETRY_BACKOFF_SECONDS = 2.0
+# YouTube only returns caption tracks for some player clients. When the default
+# client set is throttled, yt-dlp downgrades to a client that reports zero
+# captions, which used to look identical to a video that genuinely has none.
+CAPTION_REPROBE_ARGS = ["--extractor-args", "youtube:player_client=web_safari,web,default"]
+CREDENTIAL_LABEL_RE = re.compile(r"^\[(?:cookies file|no cookies)\b[^\]]*\]$")
+IMPERSONATE_UNAVAILABLE_MARKER = "no impersonate target is available"
+IMPERSONATE_ACTION = (
+    "当前 yt-dlp 缺少浏览器指纹依赖，YouTube 字幕接口会间歇性拒绝请求。"
+    '请运行 pip install "yt-dlp[default,curl-cffi]" 后重试。'
+)
+TRANSIENT_SUBTITLE_MARKERS = (
+    "429",
+    "too many requests",
+    "403",
+    "forbidden",
+    "timed out",
+    "timeout",
+    "temporarily",
+    "connection reset",
+    "connection aborted",
+    "remote end closed",
+)
 SKILL_DIR = Path(__file__).resolve().parent.parent
 CREDENTIALS_DIR = Path.home() / ".config" / "opencode" / "credentials" / "youtube-transcript"
 CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -404,6 +428,37 @@ def is_cookie_auth_failure(output: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def is_transient_subtitle_failure(output: str) -> bool:
+    text = output.lower()
+    return any(marker in text for marker in TRANSIENT_SUBTITLE_MARKERS)
+
+
+def summarize_ytdlp_failure(raw: str, *, limit: int = 300) -> str:
+    """Keep the actionable yt-dlp diagnosis instead of credential labels and warnings.
+
+    yt-dlp prints benign warnings before the fatal line, and the credential label
+    can be a long absolute path. Truncating the raw blob therefore used to drop the
+    only line that explains the failure.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    others: list[str] = []
+    for raw_line in (raw or "").splitlines():
+        line = raw_line.strip()
+        if not line or CREDENTIAL_LABEL_RE.match(line):
+            continue
+        lowered = line.lower()
+        if lowered.startswith("error:") or "http error" in lowered:
+            errors.append(line)
+        elif lowered.startswith("warning:"):
+            warnings.append(line)
+        else:
+            others.append(line)
+    detail = " ".join(errors or others or warnings)
+    detail = re.sub(r"https?://\S+", "[URL]", detail)
+    return re.sub(r"\s+", " ", detail).strip()[:limit]
+
+
 def extract_json(stdout: str) -> dict:
     stdout = stdout.strip()
     if not stdout:
@@ -474,23 +529,53 @@ def download_subtitle(runner: YtDlp, url: str, metadata: dict, choice: SubtitleC
         output_template,
         url,
     ]
-    result = runner.run(args, purpose=f"download {choice.lang} subtitles", check=False, timeout=45)
+    last_error = ""
+    for attempt in range(1, SUBTITLE_ATTEMPTS + 1):
+        result = runner.run(args, purpose=f"download {choice.lang} subtitles", check=False, timeout=45)
+        if result.returncode == 0:
+            files = find_vtt_files(tmp_dir, metadata.get("id", ""))
+            if files:
+                return files[0], ""
+            last_error = "yt-dlp reported success but no .vtt subtitle file was created"
+        else:
+            last_error = result.stderr
+        # Throttling and TLS resets are the common cause here, so retry those once
+        # instead of reporting a video with captions as having none.
+        if attempt >= SUBTITLE_ATTEMPTS or not is_transient_subtitle_failure(last_error):
+            break
+        time.sleep(SUBTITLE_RETRY_BACKOFF_SECONDS)
+    return None, last_error
+
+
+def reprobe_subtitle_choice(runner: YtDlp, url: str, preferred_langs: str) -> SubtitleChoice | None:
+    """Ask a caption-capable player client before declaring a video subtitle-free."""
+    result = runner.run(
+        [*CAPTION_REPROBE_ARGS, "--dump-single-json", "--no-download", "--no-playlist", url],
+        purpose="re-probe subtitle tracks",
+        check=False,
+        timeout=45,
+    )
     if result.returncode != 0:
-        return None, result.stderr
-    files = find_vtt_files(tmp_dir, metadata.get("id", ""))
-    return (files[0], "") if files else (None, "yt-dlp reported success but no .vtt subtitle file was created")
+        return None
+    try:
+        metadata = extract_json(result.stdout)
+    except (json.JSONDecodeError, RuntimeError):
+        return None
+    return choose_subtitle(metadata, preferred_langs)
 
 
 def transcript_unavailable_error(choice: SubtitleChoice | None, subtitle_error: str) -> PipelineError:
     """Preserve the difference between absent subtitles and a failed download/parse."""
     if choice and subtitle_error.strip():
-        detail = re.sub(r"https?://\S+", "[URL]", subtitle_error.strip())
-        detail = re.sub(r"\s+", " ", detail)[:300]
+        detail = summarize_ytdlp_failure(subtitle_error)
+        action = "请稍后重试；如接受下载音频和更长耗时，可在本次任务中明确允许 ASR。"
+        if IMPERSONATE_UNAVAILABLE_MARKER in subtitle_error.lower():
+            action = f"{IMPERSONATE_ACTION} {action}"
         return PipelineError(
             "SUBTITLE_DOWNLOAD_FAILED",
             "transcript",
             f"检测到 {choice.lang} {choice.source} 字幕，但字幕下载失败：{detail}",
-            action="请稍后重试；如接受下载音频和更长耗时，可在本次任务中明确允许 ASR。",
+            action=action,
         )
     if choice:
         return PipelineError(
@@ -1635,6 +1720,10 @@ def main(argv: list[str] | None = None) -> int:
         subtitle_error = ""
 
         choice = None if args.force_asr else choose_subtitle(metadata, args.langs)
+        if choice is None and not args.force_asr:
+            choice = reprobe_subtitle_choice(runner, args.url, args.langs)
+            if choice:
+                print(f"Recovered subtitle track after re-probe: {choice.lang} ({choice.source})")
         if choice:
             emit_progress("materials", f"正在下载 {choice.lang} 字幕。", percent=18)
             print(f"Downloading subtitles: {choice.lang} ({choice.source})")

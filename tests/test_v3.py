@@ -7,13 +7,23 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from extract_frames import attach_manifest_to_note, extract_candidate, load_plan, resolve_ffmpeg  # noqa: E402
-from extract_transcript import RunResult, SubtitleChoice, download_subtitle, image_quality_score, transcript_unavailable_error  # noqa: E402
+from extract_transcript import (  # noqa: E402
+    RunResult,
+    SubtitleChoice,
+    download_subtitle,
+    image_quality_score,
+    is_transient_subtitle_failure,
+    reprobe_subtitle_choice,
+    summarize_ytdlp_failure,
+    transcript_unavailable_error,
+)
 from validate_note import validate  # noqa: E402
 from video_common import VERSION, version_text  # noqa: E402
 from video_note import version_report  # noqa: E402
@@ -248,6 +258,178 @@ frame_manifest: "YouTube video/assets/frame-manifest.json"
             self.assertEqual(generated.returncode, 0)
             self.assertTrue(extract_candidate(ffmpeg, str(video), 1.0, image, 10))
             self.assertGreater(image.stat().st_size, 10_000)
+
+
+class SubtitleDiagnosisTests(unittest.TestCase):
+    IMPERSONATE_WARNING = (
+        "WARNING: The extractor specified to use impersonation for this download, but no "
+        "impersonate target is available. If you encounter errors, then see "
+        "https://github.com/yt-dlp/yt-dlp#impersonation for information on installing the "
+        "required dependencies"
+    )
+
+    def raw_failure(self) -> str:
+        return (
+            "yt-dlp failed while trying to download zh-Hans subtitles.\n\n"
+            "[cookies file C:\\Users\\someone\\.config\\opencode\\credentials"
+            "\\youtube-transcript\\cookies.youtube.txt]\n"
+            f"{self.IMPERSONATE_WARNING}\n"
+            "ERROR: unable to download video subtitles for 'zh-Hans': HTTP Error 429: Too Many Requests\n"
+        )
+
+    def test_fatal_line_survives_long_credential_paths_and_warnings(self) -> None:
+        detail = summarize_ytdlp_failure(self.raw_failure())
+        self.assertIn("429", detail)
+        self.assertIn("Too Many Requests", detail)
+        self.assertNotIn("cookies.youtube.txt", detail)
+        self.assertNotIn("impersonate target", detail)
+
+    def test_reported_failure_explains_the_real_cause_not_the_warning(self) -> None:
+        error = transcript_unavailable_error(
+            SubtitleChoice(lang="zh-Hans", source="automatic"),
+            self.raw_failure(),
+        )
+        self.assertEqual(error.code, "SUBTITLE_DOWNLOAD_FAILED")
+        self.assertIn("429", str(error))
+        self.assertIn("curl-cffi", error.action)
+
+    def test_warning_is_kept_when_it_is_the_only_available_detail(self) -> None:
+        detail = summarize_ytdlp_failure(f"[no cookies]\n{self.IMPERSONATE_WARNING}\n")
+        self.assertIn("impersonate target", detail)
+
+    def test_urls_are_redacted_and_output_stays_bounded(self) -> None:
+        detail = summarize_ytdlp_failure("ERROR: broken https://example.com/a?b=c " + "x" * 500)
+        self.assertIn("[URL]", detail)
+        self.assertNotIn("example.com", detail)
+        self.assertLessEqual(len(detail), 300)
+
+    def test_throttled_subtitle_download_is_retried_before_giving_up(self) -> None:
+        class ThrottledRunner:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def run(self, args, *, purpose, check, timeout=None):
+                self.calls += 1
+                return RunResult(
+                    args=args,
+                    returncode=1,
+                    stdout="",
+                    stderr="ERROR: HTTP Error 429: Too Many Requests",
+                    credential_label="",
+                )
+
+        runner = ThrottledRunner()
+        with tempfile.TemporaryDirectory() as raw, mock.patch("extract_transcript.time.sleep"):
+            path, error = download_subtitle(
+                runner,  # type: ignore[arg-type]
+                "https://www.youtube.com/watch?v=J1WoNuemKOg",
+                {"id": "J1WoNuemKOg"},
+                SubtitleChoice(lang="zh-Hans", source="automatic"),
+                Path(raw),
+            )
+        self.assertEqual(runner.calls, 2)
+        self.assertIsNone(path)
+        self.assertIn("429", error)
+
+    def test_permanent_subtitle_failure_is_not_retried(self) -> None:
+        class MissingTrackRunner:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def run(self, args, *, purpose, check, timeout=None):
+                self.calls += 1
+                return RunResult(
+                    args=args,
+                    returncode=1,
+                    stdout="",
+                    stderr="ERROR: requested format is not available",
+                    credential_label="",
+                )
+
+        runner = MissingTrackRunner()
+        with tempfile.TemporaryDirectory() as raw:
+            download_subtitle(
+                runner,  # type: ignore[arg-type]
+                "https://www.youtube.com/watch?v=J1WoNuemKOg",
+                {"id": "J1WoNuemKOg"},
+                SubtitleChoice(lang="zh-Hans", source="automatic"),
+                Path(raw),
+            )
+        self.assertEqual(runner.calls, 1)
+
+    def test_retry_succeeds_after_a_transient_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp_dir = Path(raw)
+
+            class RecoveringRunner:
+                def __init__(self) -> None:
+                    self.calls = 0
+
+                def run(self, args, *, purpose, check, timeout=None):
+                    self.calls += 1
+                    if self.calls == 1:
+                        return RunResult(args=args, returncode=1, stdout="", stderr="timed out", credential_label="")
+                    (tmp_dir / "J1WoNuemKOg.zh-Hans.vtt").write_text("WEBVTT\n", encoding="utf-8")
+                    return RunResult(args=args, returncode=0, stdout="", stderr="", credential_label="")
+
+            runner = RecoveringRunner()
+            with mock.patch("extract_transcript.time.sleep"):
+                path, error = download_subtitle(
+                    runner,  # type: ignore[arg-type]
+                    "https://www.youtube.com/watch?v=J1WoNuemKOg",
+                    {"id": "J1WoNuemKOg"},
+                    SubtitleChoice(lang="zh-Hans", source="automatic"),
+                    tmp_dir,
+                )
+            self.assertEqual(runner.calls, 2)
+            self.assertIsNotNone(path)
+            self.assertEqual(error, "")
+
+    def test_transient_marker_detection(self) -> None:
+        self.assertTrue(is_transient_subtitle_failure("HTTP Error 403: Forbidden"))
+        self.assertTrue(is_transient_subtitle_failure("Connection reset by peer"))
+        self.assertFalse(is_transient_subtitle_failure("requested format is not available"))
+
+    def test_downgraded_player_client_does_not_report_captions_as_missing(self) -> None:
+        class ReprobeRunner:
+            def __init__(self) -> None:
+                self.args: list[str] = []
+
+            def run(self, args, *, purpose, check, timeout=None):
+                self.args = list(args)
+                payload = {"id": "J1WoNuemKOg", "automatic_captions": {"zh-Hans": [{"ext": "vtt"}]}}
+                return RunResult(args=args, returncode=0, stdout=json.dumps(payload), stderr="", credential_label="")
+
+        runner = ReprobeRunner()
+        choice = reprobe_subtitle_choice(runner, "https://www.youtube.com/watch?v=J1WoNuemKOg", "zh-Hans")
+        self.assertIsNotNone(choice)
+        assert choice is not None
+        self.assertEqual(choice.lang, "zh-Hans")
+        self.assertEqual(choice.source, "automatic")
+        self.assertIn("youtube:player_client=web_safari,web,default", runner.args)
+
+    def test_reprobe_stays_silent_when_the_video_really_has_no_captions(self) -> None:
+        class EmptyRunner:
+            def run(self, args, *, purpose, check, timeout=None):
+                payload = {"id": "J1WoNuemKOg", "subtitles": {}, "automatic_captions": {}}
+                return RunResult(args=args, returncode=0, stdout=json.dumps(payload), stderr="", credential_label="")
+
+        self.assertIsNone(
+            reprobe_subtitle_choice(EmptyRunner(), "https://www.youtube.com/watch?v=J1WoNuemKOg", "zh-Hans")  # type: ignore[arg-type]
+        )
+
+    def test_reprobe_tolerates_unusable_output(self) -> None:
+        class BrokenRunner:
+            def run(self, args, *, purpose, check, timeout=None):
+                return RunResult(args=args, returncode=0, stdout="not json", stderr="", credential_label="")
+
+        self.assertIsNone(
+            reprobe_subtitle_choice(BrokenRunner(), "https://www.youtube.com/watch?v=J1WoNuemKOg", "zh-Hans")  # type: ignore[arg-type]
+        )
+
+    def test_impersonation_dependency_is_declared(self) -> None:
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("curl-cffi", requirements)
 
 
 if __name__ == "__main__":
