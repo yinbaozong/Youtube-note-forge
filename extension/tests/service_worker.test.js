@@ -32,7 +32,7 @@ function createWorker(fetchImpl) {
       getAll: async () => [{ domain: ".youtube.com", name: "SID", path: "/", value: "test" }],
     },
     runtime: {
-      getManifest: () => ({ version: "4.1.0" }),
+      getManifest: () => ({ version: "4.1.1" }),
       id: "abcdefghijklmnopabcdefghijklmnop",
       onMessage: { addListener: (value) => { listener = value; } },
     },
@@ -69,12 +69,34 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
+test("concurrent starts submit once and status cannot restore the previous failure", async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let submitted = 0;
+  const worker = createWorker(async (url, options = {}) => {
+    if (url.endsWith("/active")) return jsonResponse({ status: "idle" });
+    if (url.endsWith("/health")) { await gate; return jsonResponse({ status: "ok" }); }
+    if (url.endsWith("/latest")) throw new Error("Old history must not be fetched during startup");
+    submitted++;
+    return jsonResponse({ type: "accepted", status: "running", request_id: JSON.parse(options.body).request_id });
+  });
+  const first = worker.send({ type: "start_job", allow_asr: true });
+  const second = worker.send({ type: "start_job" });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const during = await worker.send({ type: "get_status" });
+  assert.equal(during.status, "running");
+  assert.equal(during.allow_asr, true);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(submitted, 1);
+});
+
 test("start job marks active, health, and RPC requests with the extension identity", async () => {
   const requests = [];
   const worker = createWorker(async (url, options = {}) => {
     requests.push({ url, options });
     if (url.endsWith("/active")) return jsonResponse({ type: "status", status: "idle" });
-    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.1.0", current_vault: "C:\\Vault" });
+    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.1.1", current_vault: "C:\\Vault" });
     return jsonResponse({
       type: "accepted",
       status: "running",
@@ -90,20 +112,20 @@ test("start job marks active, health, and RPC requests with the extension identi
   for (const request of requests) {
     assert.equal(
       new Headers(request.options.headers).get("X-YouTube-Reader-Client"),
-      "abcdefghijklmnopabcdefghijklmnop@4.1.0"
+      "abcdefghijklmnopabcdefghijklmnop@4.1.1"
     );
   }
 });
 
 test("settings never report connected when the authenticated RPC is rejected", async () => {
   const worker = createWorker(async (url) => {
-    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.1.0" });
+    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.1.1" });
     return jsonResponse({
       type: "error",
       status: "error",
       code: "EXTENSION_CLIENT_REJECTED",
       message: "Chrome 扩展请求未通过本地连接校验。",
-      plugin_version: "4.1.0",
+      plugin_version: "4.1.1",
     }, 403);
   });
 

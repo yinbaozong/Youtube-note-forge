@@ -165,7 +165,7 @@ export class JobManager {
           ...settings,
           current_model: settings.model,
           current_vault: this.options.vaultBasePath,
-          plugin_version: "4.1.0",
+          plugin_version: "4.1.1",
           api_key_configured: hasApiKey(this.options.app),
         },
       };
@@ -174,9 +174,10 @@ export class JobManager {
   }
 
   async start(request: StartJobRequest): Promise<JobState & { active_request_id?: string }> {
-    if (this.running && this.state.status === "running") {
+    if (this.state.status === "running") {
       return { ...this.latest, type: "attached", active_request_id: this.state.request_id };
     }
+    if (this.running) await this.running;
     if (!request.request_id || !isSupportedVideoUrl(request.url)) {
       throw new Error("VIDEO_URL_INVALID: 请提供有效的 YouTube 或 Bilibili 视频链接。");
     }
@@ -264,9 +265,7 @@ export class JobManager {
       const cookie = await saveYouTubeCookies(request.cookies || []);
       await this.progress("credentials", `已保存 ${cookie.count} 个 Cookie。`, 4);
 
-      let material = request.resume
-        ? await findReusableArtifacts(this.options.vaultBasePath, settings.outputFolder, request.url)
-        : null;
+      let material = await findReusableArtifacts(this.options.vaultBasePath, settings.outputFolder, request.url);
       if (!material) {
         await this.progress("materials", "正在提取元数据、字幕、SRT 和封面。", 12);
         const args = [
@@ -512,6 +511,7 @@ export class JobManager {
   }
 
   private async progress(stage: string, message: string, percent: number): Promise<void> {
+    if (this.state.status !== "running") return;
     await this.setState({
       type: "progress",
       status: "running",

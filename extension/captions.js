@@ -4,7 +4,8 @@ async function collectPageCaptions(expectedId) {
   const currentId = () => new URL(location.href).searchParams.get("v") || location.pathname.split("/")[2];
   if (currentId() !== expectedId) return { status: "video_mismatch" };
   const player = document.querySelector("#movie_player");
-  const response = player?.getPlayerResponse?.() || window.ytInitialPlayerResponse || {};
+  const liveResponse = player?.getPlayerResponse?.();
+  const response = liveResponse?.videoDetails?.videoId === expectedId ? liveResponse : window.ytInitialPlayerResponse || {};
   if (response.videoDetails?.videoId !== expectedId) return { status: "player_not_ready" };
   const duration = Number(response.videoDetails.lengthSeconds);
   const metadata = {
@@ -31,6 +32,21 @@ async function collectPageCaptions(expectedId) {
     return { status: "ok", video_id: expectedId, metadata, language, source, entries };
   }
   function panelTranscript() {
+    // Read the complete native panel model when only a viewport of rows is mounted.
+    for (const panel of document.querySelectorAll("ytd-transcript-renderer")) {
+      const entries = [];
+      const visit = (node, depth = 0) => {
+        if (!node || typeof node !== "object" || depth > 18) return;
+        const segment = node.transcriptSegmentRenderer;
+        if (segment) entries.push({ start: Number(segment.startMs) / 1000,
+          end: Number(segment.endMs) / 1000,
+          text: (segment.snippet?.runs || []).map(run => run.text || "").join("") || segment.snippet?.simpleText || "" });
+        for (const value of Object.values(node)) visit(value, depth + 1);
+      };
+      visit(panel.data);
+      const ready = finish(entries, "und", "browser:youtube-transcript");
+      if (ready) return ready;
+    }
     const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer, ytd-transcript-segment-list-renderer [role=listitem]")];
     const entries = rows.map(row => {
       const stamp = (row.querySelector(".segment-timestamp") || row.querySelector("[class*=timestamp]"))?.textContent?.trim() || "";

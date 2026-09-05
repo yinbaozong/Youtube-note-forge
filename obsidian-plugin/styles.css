@@ -16,6 +16,14 @@
 .youtube-reader-filters input { grid-column: 1 / -1; }
 .youtube-reader-list { margin-top: 10px; }
 .youtube-reader-row { border-top: 1px solid var(--background-modifier-border); padding: 9px 0; }
-.youtube-reader-title { appearance: none; border: 0; background: none; color: var(--text-normal); padding: 0; text-align: left; font-weight: 600; cursor: pointer; }
+.youtube-reader-center .youtube-reader-title { appearance: none; border: 0; box-shadow: none; background: transparent; color: var(--text-normal); padding: 0; text-align: left; font-weight: 500; cursor: pointer; height: auto; white-space: normal; line-height: 1.55; overflow-wrap: anywhere; width: 100%; }
 .youtube-reader-title:disabled { cursor: default; }
 .youtube-reader-meta { color: var(--text-muted); font-size: var(--font-ui-smaller); margin: 4px 0; }
+.youtube-reader-center { overflow-x: hidden; }
+.youtube-reader-filters > * { width: 100%; min-width: 0; }
+.youtube-reader-row { position: relative; padding: 14px 28px 14px 0; }
+.youtube-reader-original { position: absolute; right: 0; top: 16px; color: var(--text-muted); }
+.youtube-reader-original svg { width: 16px; height: 16px; }
+.youtube-reader-active { margin: 12px 0; padding: 10px 0; border-block: 1px solid var(--background-modifier-border); overflow-wrap: anywhere; }
+.youtube-reader-active progress { display: block; width: 100%; height: 5px; margin: 10px 0; }
+.youtube-reader-empty { padding: 28px 4px; color: var(--text-muted); text-align: center; }

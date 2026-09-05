@@ -34,6 +34,17 @@ test("rejects a stale player response from another video", async () => {
   assert.equal(result.status, "player_not_ready");
 });
 
+test("reads complete native model even when only visible rows are mounted", async () => {
+  const context = page();
+  context.document.querySelectorAll = selector => selector === "ytd-transcript-renderer" ? [{ data: { body: { segments: [
+    { transcriptSegmentRenderer: { startMs: "0", endMs: "1000", snippet: { runs: [{ text: "Opening" }] } } },
+    { transcriptSegmentRenderer: { startMs: "95000", endMs: "100000", snippet: { runs: [{ text: "End" }] } } },
+  ] } } }] : [];
+  const result = await vm.runInContext('collectPageCaptions("P2zRQ3BUu30")', context);
+  assert.equal(result.status, "ok");
+  assert.equal(result.entries.length, 2);
+});
+
 test("duplicate transcript panels produce one ordered transcript", async () => {
   const context = page();
   const row = (stamp, text) => ({ querySelector: selector => ({ textContent: selector === ".segment-timestamp" ? stamp : text }) });

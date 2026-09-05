@@ -53,7 +53,10 @@ export class PythonScriptRunner {
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
 
+    let readingProgress = false;
     const readProgress = async () => {
+      if (readingProgress) return;
+      readingProgress = true;
       try {
         const content = await fs.readFile(progressPath, "utf8");
         const lines = content.split(/\r?\n/).filter(Boolean);
@@ -68,6 +71,8 @@ export class PythonScriptRunner {
         progressLinesSeen = lines.length;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      } finally {
+        readingProgress = false;
       }
     };
     const progressTimer = setInterval(() => void readProgress(), 500);

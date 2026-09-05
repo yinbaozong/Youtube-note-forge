@@ -247,11 +247,21 @@ def yaml_scalar(value) -> str:
 
 
 def run_subprocess(args: list[str], *, check: bool = False, timeout: int = 90) -> RunResult:
+    process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace")
     try:
-        completed = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        stdout, stderr = process.communicate(timeout=timeout)
+        completed = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        if os.name == "nt":
+            try:
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               capture_output=True, timeout=10, check=False)
+            finally:
+                process.kill()
+        else:
+            process.kill()
+        stdout, stderr = process.communicate()
         result = RunResult(
             args=args,
             returncode=124,
@@ -726,10 +736,15 @@ def deduplicate_entries(entries: list[TranscriptEntry]) -> list[TranscriptEntry]
 def download_audio(runner: YtDlp, url: str, tmp_dir: Path) -> Path:
     output_template = str(tmp_dir / "audio.%(ext)s")
     result = runner.run(
-        ["-f", "bestaudio/best", "--no-playlist", "-o", output_template, url],
+        ["-f", "bestaudio[abr<=96]/bestaudio", "--no-playlist", "-o", output_template, url],
         purpose="download audio for ASR",
+        check=False,
+        timeout=120,
     )
-    candidates = [p for p in tmp_dir.glob("audio.*") if p.is_file()]
+    if result.returncode != 0:
+        code = "ASR_AUDIO_TIMEOUT" if result.returncode == 124 else "ASR_AUDIO_DOWNLOAD_FAILED"
+        raise RuntimeError(f"{code}: ASR 音频下载{'超时' if result.returncode == 124 else '失败'}，语音识别尚未开始。请检查 YouTube 音频连接后重试。")
+    candidates = [p for p in tmp_dir.glob("audio.*") if p.is_file() and p.suffix not in (".part", ".ytdl")]
     if not candidates:
         raise RuntimeError("Audio download succeeded but no audio file was created.\n" + result.stderr)
     return max(candidates, key=lambda p: p.stat().st_size)
@@ -1776,7 +1791,7 @@ def main(argv: list[str] | None = None) -> int:
     title = metadata.get("title") or metadata.get("id") or "video"
     output_file = output_dir / (args.output_filename or (suggested_note_filename(title) + ".md"))
 
-    temp_context = tempfile.TemporaryDirectory(prefix="video-learning-")
+    temp_context = tempfile.TemporaryDirectory(prefix="video-learning-", ignore_cleanup_errors=True)
     tmp_dir = Path(temp_context.name)
     try:
         transcript_entries: list[TranscriptEntry] = []
@@ -1808,7 +1823,9 @@ def main(argv: list[str] | None = None) -> int:
             if not args.allow_asr:
                 raise transcript_unavailable_error(choice, subtitle_error)
             print("No usable subtitles found; downloading audio for ASR fallback...")
+            emit_progress("materials", "正在下载 ASR 音频（最多 120 秒）。", percent=18)
             audio_path = download_audio(runner, args.url, tmp_dir)
+            emit_progress("materials", "音频已下载，正在本地语音识别。", percent=20)
             transcript_entries, transcript_source = transcribe_audio(audio_path, args.asr_model)
             transcript_language = transcript_source.split(":")[-1]
 

@@ -55,7 +55,7 @@ export default class YouTubeNoteReaderPlugin extends Plugin {
         this.data.latestJob = state;
         this.data.taskHistory = updateHistory(this.data.taskHistory || [], state);
         await this.persistData();
-        this.refreshTaskCenter();
+        try { this.refreshTaskCenter(); } catch (error) { console.warn("Task center refresh failed", error); }
       },
       openNote: (note) => this.openNote(note),
       openSettings: () => this.openSettings(),
@@ -63,7 +63,9 @@ export default class YouTubeNoteReaderPlugin extends Plugin {
       initialState: this.data.latestJob,
     });
     await this.jobs.markInterruptedOnLoad();
-    await this.importHistoryOnce();
+    this.app.workspace.onLayoutReady(() => {
+      void this.importHistoryOnce().then(() => this.refreshTaskCenter());
+    });
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       if (!(file instanceof TFile)) return;
       const oldAbsolute = `${this.vaultBasePath}\\${oldPath.replaceAll("/", "\\")}`;
@@ -151,10 +153,9 @@ export default class YouTubeNoteReaderPlugin extends Plugin {
   }
 
   private async importHistoryOnce(): Promise<void> {
-    if (this.data.historyImported) return;
     const existing = this.data.taskHistory || [];
     for (const file of this.app.vault.getMarkdownFiles()) {
-      if (!file.path.startsWith(`${this.settings.outputFolder}/`) || file.path.includes("/.reader-drafts/") || file.path.includes("/transcripts/")) continue;
+      if (!file.path.startsWith(`${this.settings.outputFolder}/`) || file.path.includes("/.reader-drafts/") || file.path.includes("/transcripts/") || file.basename.startsWith("待命名 -")) continue;
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const url = String(frontmatter?.url || "");
       if (!/youtu(?:\.be|be\.com)|bilibili\.com/i.test(url)) continue;

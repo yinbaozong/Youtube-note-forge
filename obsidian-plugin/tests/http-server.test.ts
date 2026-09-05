@@ -5,7 +5,7 @@ import type { JobManager } from "../src/job-manager";
 import { PluginHttpServer } from "../src/http-server";
 
 const EXTENSION_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
-const CLIENT_IDENTITY = "abcdefghijklmnopabcdefghijklmnop@4.1.0";
+const CLIENT_IDENTITY = "abcdefghijklmnopabcdefghijklmnop@4.1.1";
 
 function createJobs(): JobManager {
   return {
@@ -14,7 +14,7 @@ function createJobs(): JobManager {
     statusFor: () => null,
     handleRpc: async (payload: Record<string, unknown>) => ({
       type: payload.type === "get_settings" ? "settings" : "ok",
-      settings: payload.type === "get_settings" ? { plugin_version: "4.1.0" } : undefined,
+      settings: payload.type === "get_settings" ? { plugin_version: "4.1.1" } : undefined,
     }),
   } as unknown as JobManager;
 }
@@ -42,7 +42,7 @@ test("keeps the originless health probe available without authorizing job endpoi
       code: "EXTENSION_CLIENT_REJECTED",
       message: "Chrome 扩展请求未通过本地连接校验。",
       endpoint: "GET /active",
-      plugin_version: "4.1.0",
+      plugin_version: "4.1.1",
     });
   });
 });

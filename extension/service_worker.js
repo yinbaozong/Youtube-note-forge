@@ -21,6 +21,10 @@ let state = createInitialState();
 let pollTimer = null;
 let activePoll = null;
 let startPromise = null;
+let revision = 0;
+const restored = chrome.storage.session.get("jobState").then(({ jobState }) => {
+  if (jobState && revision === 0) state = createInitialState(jobState);
+});
 
 function createConnectionError() {
   const error = new Error(CONNECTION_ERROR_MESSAGE);
@@ -55,6 +59,7 @@ async function updateActionIndicator(jobState) {
 }
 
 async function updateState(patch) {
+  revision += 1;
   state = { ...state, ...patch };
   await chrome.storage.session.set({ jobState: state });
   await updateActionIndicator(state);
@@ -160,6 +165,7 @@ async function pollJob() {
       await updateState(applyStatus(message));
       if (state.status !== "running") stopPolling();
     } catch (error) {
+      if (state.request_id !== expectedRequestId) return state;
       stopPolling();
       await updateState({
         status: "error",
@@ -194,11 +200,15 @@ function isYouTubeUrl(url) {
 
 async function startJob(options = {}) {
   if (startPromise) return startPromise;
-  startPromise = startJobUnlocked(options).finally(() => { startPromise = null; });
+  startPromise = startJobUnlocked(options).catch(async error => {
+    await updateState({ status: "error", stage: "failed", message: error.message, code: error.code || "START_FAILED" });
+    return state;
+  }).finally(() => { startPromise = null; });
   return startPromise;
 }
 
 async function startJobUnlocked(options = {}) {
+  await restored;
   if (state.status === "running") await pollJob();
 
   let active;
@@ -302,7 +312,9 @@ async function startJobUnlocked(options = {}) {
       payload.browser_transcript = browserTranscript;
       await updateState({ caption_diagnostic: [browserTranscript.status, browserTranscript.diagnostic].filter(Boolean).join(":") });
     }
+    if (state.request_id !== requestId || state.status !== "running") return state;
     const response = await pluginRequest(payload);
+    if (state.request_id !== requestId || state.status !== "running") return state;
     await updateState(applyStatus(response));
     if (response.type === "attached" && response.active_request_id) {
       await updateState({ request_id: response.active_request_id });
@@ -364,18 +376,21 @@ async function cancelJob() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     if (message.type === "get_status") {
-      const stored = await chrome.storage.session.get("jobState");
-      if (stored.jobState) state = createInitialState(stored.jobState);
+      await restored;
+      if (startPromise) return state;
+      const observedRevision = revision;
       if (state.status === "running") await pollJob();
       if (state.status !== "running") {
         try {
           const active = await pluginActive();
+          if (startPromise || revision !== observedRevision) return state;
           if (active.status === "running" && active.request_id) {
             await updateState(applyStatus(active));
             await updateState({ request_id: active.request_id });
             startPolling();
           } else {
             const latest = await pluginLatest();
+            if (startPromise || revision !== observedRevision) return state;
             if (
               ["ok", "error", "cancelled"].includes(latest.status)
               && (state.status === "idle" || latest.request_id !== state.request_id)

@@ -20,6 +20,8 @@ let currentNotePath = "";
 let currentPhotosPath = "";
 let currentVideoUrl = "";
 let currentVideoTitle = "";
+let starting = false;
+let refreshSequence = 0;
 
 const STAGE_LABELS = {
   idle: "准备",
@@ -119,13 +121,18 @@ function render(state) {
 }
 
 async function refresh() {
-  render(await send({ type: "get_status" }));
+  const sequence = ++refreshSequence;
+  const next = await send({ type: "get_status" });
+  if (!starting && sequence === refreshSequence) render(next);
 }
 
 start.addEventListener("click", async () => {
+  starting = true;
+  refreshSequence += 1;
   start.disabled = true;
   statusNode.textContent = "正在启动当前视频…";
-  render(await send({ type: "start_job", resume: false, allow_asr: false }));
+  try { render(await send({ type: "start_job", resume: false, allow_asr: false })); }
+  finally { starting = false; }
 });
 
 resume.addEventListener("click", async () => {
@@ -138,6 +145,8 @@ resume.addEventListener("click", async () => {
 });
 
 retryAsr.addEventListener("click", async () => {
+  starting = true;
+  refreshSequence += 1;
   retryAsr.disabled = true;
   statusNode.textContent = "已允许 ASR，正在重新开始任务…";
   try {
@@ -149,6 +158,7 @@ retryAsr.addEventListener("click", async () => {
       allow_asr: true
     }));
   } finally {
+    starting = false;
     retryAsr.disabled = false;
   }
 });

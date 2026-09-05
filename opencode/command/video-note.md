@@ -3,7 +3,7 @@ description: Convert one or more video URLs into verified Chinese Obsidian learn
 agent: video-note
 ---
 
-Use the optional `youtube-transcript` v4.1.0 OpenCode compatibility workflow for: $ARGUMENTS
+Use the optional `youtube-transcript` v4.1.1 OpenCode compatibility workflow for: $ARGUMENTS
 
 When `$ARGUMENTS` begins with `RESUME_EXISTING_TASK`, follow the resume contract in the `video-note` Agent: locate the same URL's existing note, SRT and frame manifest, reuse every valid completed artifact, and continue from the earliest missing stage instead of restarting extraction.
 
