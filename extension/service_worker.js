@@ -20,6 +20,7 @@ const CLIENT_IDENTITY = buildClientIdentity(chrome.runtime.id, EXTENSION_VERSION
 let state = createInitialState();
 let pollTimer = null;
 let activePoll = null;
+let startPromise = null;
 
 function createConnectionError() {
   const error = new Error(CONNECTION_ERROR_MESSAGE);
@@ -64,7 +65,10 @@ async function pluginFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set("X-YouTube-Reader-Client", CLIENT_IDENTITY);
   try {
-    response = await fetch(PLUGIN_BASE + path, { ...options, headers });
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 10000) : null;
+    try { response = await fetch(PLUGIN_BASE + path, { ...options, headers, ...(controller ? { signal: controller.signal } : {}) }); }
+    finally { if (timeout) clearTimeout(timeout); }
   } catch (_error) {
     throw createConnectionError();
   }
@@ -135,6 +139,7 @@ function stopPolling() {
 
 async function pollJob() {
   if (activePoll || state.status !== "running" || !state.request_id) return state;
+  const expectedRequestId = state.request_id;
   activePoll = (async () => {
     try {
       let message = await pluginStatus(state.request_id);
@@ -151,6 +156,7 @@ async function pollJob() {
               message: "活动任务已经中断。可点击“继续上次任务”，复用已有素材并完成文章。"
             };
       }
+      if (state.request_id !== expectedRequestId) return state;
       await updateState(applyStatus(message));
       if (state.status !== "running") stopPolling();
     } catch (error) {
@@ -187,11 +193,13 @@ function isYouTubeUrl(url) {
 }
 
 async function startJob(options = {}) {
-  if (state.status === "running") {
-    await pollJob();
-    startPolling();
-    return state;
-  }
+  if (startPromise) return startPromise;
+  startPromise = startJobUnlocked(options).finally(() => { startPromise = null; });
+  return startPromise;
+}
+
+async function startJobUnlocked(options = {}) {
+  if (state.status === "running") await pollJob();
 
   let active;
   try {
@@ -290,7 +298,10 @@ async function startJob(options = {}) {
       resume,
       allowAsr
     });
-    if (browserTranscript) payload.browser_transcript = browserTranscript;
+    if (browserTranscript) {
+      payload.browser_transcript = browserTranscript;
+      await updateState({ caption_diagnostic: [browserTranscript.status, browserTranscript.diagnostic].filter(Boolean).join(":") });
+    }
     const response = await pluginRequest(payload);
     await updateState(applyStatus(response));
     if (response.type === "attached" && response.active_request_id) {

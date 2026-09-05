@@ -21,10 +21,10 @@ test("new task state clears ASR and previous output fields", () => {
 
 test("client identity binds every local request to the running extension version", () => {
   assert.equal(
-    buildClientIdentity("abcdefghijklmnopabcdefghijklmnop", "4.0.5"),
-    "abcdefghijklmnopabcdefghijklmnop@4.0.5"
+    buildClientIdentity("abcdefghijklmnopabcdefghijklmnop", "4.1.0"),
+    "abcdefghijklmnopabcdefghijklmnop@4.1.0"
   );
-  assert.throws(() => buildClientIdentity("", "4.0.5"), /扩展 ID/);
+  assert.throws(() => buildClientIdentity("", "4.1.0"), /扩展 ID/);
 });
 
 test("start payload excludes Chrome-side model and vault configuration", () => {
@@ -82,27 +82,27 @@ test("backend resume flag survives status updates", () => {
 test("plugin settings prefer RPC values and fall back to health", () => {
   assert.deepEqual(
     normalizePluginSettings(
-      { status: "ok", model: "health/model", default_vault: "C:\\Vault", version: "4.0.5" },
+      { status: "ok", model: "health/model", default_vault: "C:\\Vault", version: "4.1.0" },
       { type: "settings", current_model: "rpc/model", api_key_configured: true }
     ),
     {
       connected: true,
       model: "rpc/model",
       vault: "C:\\Vault",
-      plugin_version: "4.0.5",
+      plugin_version: "4.1.0",
       api_key_configured: true
     }
   );
   assert.deepEqual(
     normalizePluginSettings(
-      { status: "ok", version: "4.0.5" },
+      { status: "ok", version: "4.1.0" },
       { type: "settings", settings: { model: "nested/model", vault: "D:\\Notes" } }
     ),
     {
       connected: true,
       model: "nested/model",
       vault: "D:\\Notes",
-      plugin_version: "4.0.5",
+      plugin_version: "4.1.0",
       api_key_configured: false
     }
   );
@@ -110,12 +110,12 @@ test("plugin settings prefer RPC values and fall back to health", () => {
 
 test("health alone never reports a green connection without a successful settings RPC", () => {
   assert.deepEqual(
-    normalizePluginSettings({ status: "ok", version: "4.0.5" }, {}),
+    normalizePluginSettings({ status: "ok", version: "4.1.0" }, {}),
     {
       connected: false,
       model: "未配置",
       vault: "未配置",
-      plugin_version: "4.0.5",
+      plugin_version: "4.1.0",
       api_key_configured: false
     }
   );

@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import type { App } from "obsidian";
@@ -23,7 +24,8 @@ import { planningPrompt, repairPrompt, writingPrompt } from "./prompts";
 import { getApiKey, type YouTubeReaderSettings } from "./settings";
 import type { PipelineResult, PipelineStage, PipelineStatus } from "./types";
 
-const MAX_JOB_MS = 8 * 60 * 1000;
+const STANDARD_JOB_MS = 8 * 60 * 1000;
+const DETAILED_JOB_MS = 12 * 60 * 1000;
 const STAGE_PERCENT: Record<string, number> = {
   credentials: 4,
   materials: 12,
@@ -65,6 +67,10 @@ export interface JobState {
   can_resume?: boolean;
   result_stage?: string;
   technical_message?: string;
+  topic?: string;
+  writing_style?: string;
+  generated_at?: string;
+  caption_diagnostic?: string;
 }
 
 export interface JobManagerOptions {
@@ -91,6 +97,8 @@ export class JobManager {
   private running: Promise<void> | null = null;
   private startedAt = 0;
   private timedOut = false;
+  private jobLimitMs = STANDARD_JOB_MS;
+  private frozenSettings: YouTubeReaderSettings | null = null;
 
   constructor(private readonly options: JobManagerOptions) {
     this.state = options.initialState || idleState();
@@ -157,7 +165,7 @@ export class JobManager {
           ...settings,
           current_model: settings.model,
           current_vault: this.options.vaultBasePath,
-          plugin_version: "4.0.5",
+          plugin_version: "4.1.0",
           api_key_configured: hasApiKey(this.options.app),
         },
       };
@@ -175,7 +183,9 @@ export class JobManager {
     this.startedAt = Date.now();
     this.timedOut = false;
     this.controller = new AbortController();
-    const settings = this.options.getSettings();
+    const settings = { ...this.options.getSettings() };
+    this.frozenSettings = settings;
+    this.jobLimitMs = settings.writingStyle === "detailed" ? DETAILED_JOB_MS : STANDARD_JOB_MS;
     this.state = {
       type: "accepted",
       request_id: request.request_id,
@@ -189,6 +199,8 @@ export class JobManager {
       output_dir: resolveInsideVault(this.options.vaultBasePath, settings.outputFolder),
       allow_asr: Boolean(request.allow_asr),
       can_resume: false,
+      writing_style: settings.writingStyle,
+      caption_diagnostic: [request.browser_transcript?.status, request.browser_transcript?.diagnostic].filter(Boolean).join(":"),
     };
     await this.options.persist(this.state);
     this.running = this.run(request).finally(() => {
@@ -235,14 +247,16 @@ export class JobManager {
       this.timedOut = true;
       this.controller?.abort();
       void this.runner.stop();
-    }, MAX_JOB_MS);
+    }, this.jobLimitMs);
     const heartbeat = setInterval(() => void this.heartbeat(), 5_000);
     let finalTarget = "";
     let priorFinal: string | null = null;
     let stagingNote = "";
     let published = false;
     try {
-      const settings = this.options.getSettings();
+      const settings = this.frozenSettings || { ...this.options.getSettings() };
+      const preferences = { writingStyle: settings.writingStyle, customWritingInstructions: settings.customWritingInstructions, allowAiExtensions: settings.allowAiExtensions };
+      const styleFingerprint = createHash("sha256").update(JSON.stringify(preferences)).digest("hex");
       const apiKey = getApiKey(this.options.app);
       const skillVersion = await readSkillVersion(settings.skillDirectory);
       const contract = await readNoteContract(settings.skillDirectory);
@@ -293,13 +307,13 @@ export class JobManager {
       const transcript = await fs.readFile(material.transcript, "utf8");
       if (!manifest) {
         await this.progress("planning", "正在根据字幕生成文章大纲和画面证据计划。", 28);
-        const prompt = planningPrompt(transcript, contract);
+        const prompt = planningPrompt(transcript, contract, preferences);
         const plan = validateArticlePlan(await requestChatJson({
           ...prompt,
           apiBase: settings.apiBase,
           apiKey,
           model: settings.model,
-          signal,
+          signal, timeoutMs: settings.writingStyle === "detailed" ? 240_000 : 180_000,
         }));
         const planDir = path.join(path.dirname(material.note), "assets", videoId(request.url));
         await fs.mkdir(planDir, { recursive: true });
@@ -338,18 +352,18 @@ export class JobManager {
       if (request.resume) {
         try {
           const cached = JSON.parse(await fs.readFile(checkpointPath, "utf8"));
-          if (cached.manifest === manifestPath && cached.version === skillVersion && cached.model === settings.model) cachedWriting = cached.writing;
+          if (cached.manifest === manifestPath && cached.version === skillVersion && cached.model === settings.model && cached.style_fingerprint === styleFingerprint) cachedWriting = cached.writing;
         } catch { /* No completed writing checkpoint yet. */ }
       }
-      const prompt = writingPrompt(transcript, contract, manifest, vaultFrames);
+      const prompt = writingPrompt(transcript, contract, manifest, vaultFrames, preferences);
       const writing = validateWritingResult(cachedWriting || await requestChatJson({
         ...prompt,
         apiBase: settings.apiBase,
         apiKey,
         model: settings.model,
-        signal,
+        signal, timeoutMs: settings.writingStyle === "detailed" ? 240_000 : 180_000,
       }));
-      await fs.writeFile(checkpointPath, JSON.stringify({ manifest: manifestPath, version: skillVersion, model: settings.model, writing }), "utf8");
+      await fs.writeFile(checkpointPath, JSON.stringify({ manifest: manifestPath, version: skillVersion, model: settings.model, style_fingerprint: styleFingerprint, writing }), "utf8");
       const safeFilename = sanitizeNoteFilename(writing.filename);
       finalTarget = resolveInsideVault(this.options.vaultBasePath, `${settings.outputFolder}/${safeFilename}`);
       priorFinal = await readIfExists(finalTarget);
@@ -358,6 +372,9 @@ export class JobManager {
         title: safeFilename.replace(/\.md$/i, ""),
         skill_version: skillVersion,
         quality_profile_version: "1",
+        topic: writing.topic,
+        generated_at: new Date().toISOString(),
+        writing_style: settings.writingStyle,
       });
       await fs.writeFile(stagingNote, finalSource, "utf8");
       await this.setState({ draft_path: stagingNote, screenshot_dir: path.dirname(manifestPath!), screenshot_count: manifest.frames.length });
@@ -373,17 +390,18 @@ export class JobManager {
           manifest,
           vaultFrames,
           safeFilename,
+          preferences,
         );
         const repaired = validateWritingResult(await requestChatJson({
           ...repair,
           apiBase: settings.apiBase,
           apiKey,
           model: settings.model,
-          signal,
+          signal, timeoutMs: settings.writingStyle === "detailed" ? 240_000 : 180_000,
         }));
         const current = await fs.readFile(stagingNote, "utf8");
         await fs.writeFile(stagingNote, composeNote(current, bindTranscript(repaired.body, srtPath), {}), "utf8");
-        await fs.writeFile(checkpointPath, JSON.stringify({ manifest: manifestPath, version: skillVersion, model: settings.model, writing: repaired }), "utf8");
+        await fs.writeFile(checkpointPath, JSON.stringify({ manifest: manifestPath, version: skillVersion, model: settings.model, style_fingerprint: styleFingerprint, writing: repaired }), "utf8");
         validation = await this.validate(settings, stagingNote, signal);
       }
       requireSuccess(validation);
@@ -408,6 +426,9 @@ export class JobManager {
         screenshot_count: manifest.frames.length,
         note_opened: noteOpened,
         can_resume: false,
+        topic: writing.topic,
+        writing_style: settings.writingStyle,
+        generated_at: new Date().toISOString(),
       });
     } catch (error) {
       if (published && finalTarget) await restoreFile(finalTarget, priorFinal);
@@ -430,7 +451,7 @@ export class JobManager {
       } else {
         const failedStage = this.state.stage;
         const message = this.timedOut
-          ? "任务超过 8 分钟硬时限，已停止。"
+          ? `任务超过 ${Math.round(this.jobLimitMs / 60000)} 分钟硬时限，已停止。`
           : String((error as Error).message || error);
         await this.setState({
           type: "error",
@@ -507,7 +528,7 @@ export class JobManager {
   }
 
   private remainingMs(): number {
-    return Math.max(1_000, MAX_JOB_MS - (Date.now() - this.startedAt));
+    return Math.max(1_000, this.jobLimitMs - (Date.now() - this.startedAt));
   }
 
   private remainingSeconds(): number {

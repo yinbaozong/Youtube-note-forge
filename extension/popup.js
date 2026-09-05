@@ -123,6 +123,8 @@ async function refresh() {
 }
 
 start.addEventListener("click", async () => {
+  start.disabled = true;
+  statusNode.textContent = "正在启动当前视频…";
   render(await send({ type: "start_job", resume: false, allow_asr: false }));
 });
 

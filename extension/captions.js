@@ -31,17 +31,21 @@ async function collectPageCaptions(expectedId) {
     return { status: "ok", video_id: expectedId, metadata, language, source, entries };
   }
   function panelTranscript() {
-    const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer")];
+    const rows = [...document.querySelectorAll("ytd-transcript-segment-renderer, ytd-transcript-segment-list-renderer [role=listitem]")];
     const entries = rows.map(row => {
-      const stamp = row.querySelector(".segment-timestamp")?.textContent?.trim() || "";
+      const stamp = (row.querySelector(".segment-timestamp") || row.querySelector("[class*=timestamp]"))?.textContent?.trim() || "";
       const start = stamp.split(":").reduce((n, s) => n * 60 + Number(s), 0);
-      return { start, text: row.querySelector(".segment-text")?.textContent?.trim() || "" };
+      return { start, text: (row.querySelector(".segment-text") || row.querySelector("yt-formatted-string[class*=segment]"))?.textContent?.trim() || "" };
     });
     return finish(entries, "und", "browser:youtube-transcript");
   }
   const existing = panelTranscript();
   if (existing) return existing;
-  const tracks = response.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  let tracks = response.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  if (!tracks.length) {
+    const refreshed = player?.getPlayerResponse?.() || {};
+    tracks = refreshed.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  }
   const original = tracks.find(t => t.languageCode === response.microformat?.playerMicroformatRenderer?.defaultAudioLanguage)
     || tracks.find(t => t.kind === "asr") || tracks[0];
   let diagnostic = tracks.length ? "caption_download_failed" : "tracks_not_exposed";
@@ -74,7 +78,8 @@ async function collectPageCaptions(expectedId) {
     if (ready) return ready;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  return { status: "unavailable", diagnostic, video_id: expectedId };
+  return { status: clicked ? "transcript_incomplete" : "page_not_ready", diagnostic, video_id: expectedId,
+    entry_count: document.querySelectorAll("ytd-transcript-segment-renderer").length };
 }
 
 if (typeof module !== "undefined") module.exports = { collectPageCaptions };

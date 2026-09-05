@@ -36,6 +36,7 @@ export interface FrameManifest {
 export interface WritingResult {
   filename: string;
   body: string;
+  topic: string;
 }
 
 export async function readSkillVersion(skillDirectory: string): Promise<string> {
@@ -80,14 +81,14 @@ export function validateArticlePlan(value: unknown): ArticlePlan {
 export function validateWritingResult(value: unknown): WritingResult {
   if (!value || typeof value !== "object") throw new Error("NOTE_RESPONSE_INVALID: 写作结果不是 JSON 对象。");
   const result = value as Partial<WritingResult>;
-  if (!String(result.filename || "").trim() || !String(result.body || "").trim()) {
-    throw new Error("NOTE_RESPONSE_INVALID: 写作结果必须包含 filename 和 body。");
+  if (!String(result.filename || "").trim() || !String(result.body || "").trim() || !String(result.topic || "").trim()) {
+    throw new Error("NOTE_RESPONSE_INVALID: 写作结果必须包含 filename、body 和中文主题。");
   }
   const body = String(result.body).trim();
   if (!body.startsWith("## 一句话摘要")) {
     throw new Error("NOTE_RESPONSE_INVALID: 正文必须从“## 一句话摘要”开始。");
   }
-  return { filename: String(result.filename).trim(), body };
+  return { filename: String(result.filename).trim(), body, topic: String(result.topic).trim() };
 }
 
 export async function findReusableArtifacts(

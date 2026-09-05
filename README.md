@@ -2,7 +2,14 @@
 
 把 YouTube、Bilibili 等长视频整理成适合 Obsidian 长期学习的中文笔记，并保留 SRT、封面和与正文对应的关键截图。
 
-当前版本：`4.0.5`
+当前版本：`4.1.0`
+
+### 4.1.0 稳定启动、任务中心与写作设置
+
+- 浏览器采集按当前视频 ID 绑定播放器和完整文字稿；采集失败会保留页面未就绪、文字稿不完整、轨道未暴露或接口状态诊断，再交给原有 yt-dlp 流程继续，不自动启用 ASR。
+- “生成学习笔记”加入启动锁和任务 ID 隔离。上一任务结束后，单击即可启动当前视频；旧轮询不会覆盖新标题、草稿或结果路径。
+- Obsidian 左侧视频图标可打开右侧“视频笔记”任务中心，支持标题搜索、时间和主题筛选，并可打开笔记或原视频。
+- Obsidian 设置新增标准学习笔记、详细教程、通俗讲解、自定义要求和 AI 延伸解读开关。AI 补充只在明确要求时生成，并单独标注。详细模式总时限 12 分钟，其他模式 8 分钟。
 
 ### 4.0.5 重复字幕面板修复
 
@@ -58,8 +65,8 @@ Chrome 当前视频页
 
 | 方式 | 发布包 | 适合人群 | 依赖 |
 | --- | --- | --- | --- |
-| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.5.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
-| 仅 Skill | `youtube-transcript-skill-v4.0.5.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
+| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.1.0.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
+| 仅 Skill | `youtube-transcript-skill-v4.1.0.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
 
 朋友使用完整阅读器时不需要安装 OpenCode，但需要使用自己的模型 API Key。
 

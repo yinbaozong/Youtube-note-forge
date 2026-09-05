@@ -15,6 +15,9 @@ export interface YouTubeReaderSettings {
   skillDirectory: string;
   outputFolder: string;
   autoOpenNote: boolean;
+  writingStyle: "standard" | "detailed" | "plain";
+  customWritingInstructions: string;
+  allowAiExtensions: boolean;
 }
 
 export function defaultSettings(vaultBasePath: string): YouTubeReaderSettings {
@@ -25,6 +28,9 @@ export function defaultSettings(vaultBasePath: string): YouTubeReaderSettings {
     skillDirectory: `${vaultBasePath}\\.obsidian\\skills\\youtube-transcript`,
     outputFolder: "YouTube video",
     autoOpenNote: true,
+    writingStyle: "standard",
+    customWritingInstructions: "",
+    allowAiExtensions: true,
   };
 }
 
@@ -175,5 +181,34 @@ export class YouTubeReaderSettingTab extends PluginSettingTab {
           this.controller.settings.autoOpenNote = value;
           await this.controller.saveSettings();
         }));
+
+    new Setting(containerEl).setName("写作设置").setHeading();
+    let pendingStyle = this.controller.settings.writingStyle;
+    let pendingInstructions = this.controller.settings.customWritingInstructions;
+    let pendingExtensions = this.controller.settings.allowAiExtensions;
+    new Setting(containerEl)
+      .setName("写作风格")
+      .setDesc("详细教程最长 12 分钟；其他模式最长 8 分钟。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("standard", "标准学习笔记")
+        .addOption("detailed", "详细教程")
+        .addOption("plain", "通俗讲解")
+        .setValue(pendingStyle)
+        .onChange((value) => { pendingStyle = value as YouTubeReaderSettings["writingStyle"]; }));
+    new Setting(containerEl)
+      .setName("自定义要求")
+      .setDesc("例如：增加参数表、重点讲清原理。留空则不额外扩写。")
+      .addTextArea((text) => text.setValue(pendingInstructions).onChange((value) => { pendingInstructions = value.trim(); }));
+    new Setting(containerEl)
+      .setName("允许 AI 延伸解读")
+      .setDesc("仅当自定义要求明确请求时生成，并单列“延伸解读（AI补充）”。")
+      .addToggle((toggle) => toggle.setValue(pendingExtensions).onChange((value) => { pendingExtensions = value; }));
+    new Setting(containerEl).addButton((button) => button.setButtonText("保存写作设置").setCta().onClick(async () => {
+      this.controller.settings.writingStyle = pendingStyle;
+      this.controller.settings.customWritingInstructions = pendingInstructions;
+      this.controller.settings.allowAiExtensions = pendingExtensions;
+      await this.controller.saveSettings();
+      new Notice("写作设置已保存，将从下一个任务开始生效。", 4_000);
+    }));
   }
 }

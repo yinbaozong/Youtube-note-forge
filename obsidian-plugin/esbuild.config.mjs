@@ -3,7 +3,7 @@ import esbuild from "esbuild";
 
 const production = process.argv[2] === "production";
 const context = await esbuild.context({
-  banner: { js: "/* YouTube Note Reader v4.0.5 */" },
+  banner: { js: "/* YouTube Note Reader v4.1.0 */" },
   bundle: true,
   entryPoints: ["src/main.ts"],
   external: ["obsidian", "electron", ...builtins, ...builtins.map((name) => `node:${name}`)],

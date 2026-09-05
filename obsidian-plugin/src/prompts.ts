@@ -1,6 +1,26 @@
 import type { FrameManifest } from "./artifacts";
+import type { YouTubeReaderSettings } from "./settings";
 
-export function planningPrompt(transcript: string, contract: string): { system: string; user: string } {
+export interface WritingPreferences {
+  writingStyle: YouTubeReaderSettings["writingStyle"];
+  customWritingInstructions: string;
+  allowAiExtensions: boolean;
+}
+
+function preferenceLines(preferences: WritingPreferences): string[] {
+  const style = preferences.writingStyle === "detailed" ? "详细教程：充分解释步骤、原理、参数与因果。"
+    : preferences.writingStyle === "plain" ? "通俗讲解：少用行话，用清晰类比解释术语。"
+      : "标准学习笔记：兼顾完整性与复习效率。";
+  return [
+    `写作风格：${style}`,
+    `自定义要求：${preferences.customWritingInstructions || "无"}`,
+    preferences.allowAiExtensions && preferences.customWritingInstructions
+      ? "如自定义要求需要视频外补充，只能放入独立的“## 延伸解读（AI补充）”，明确其不是视频内容，不得编造引用。"
+      : "不得添加视频外知识，也不要生成延伸解读章节。",
+  ];
+}
+
+export function planningPrompt(transcript: string, contract: string, preferences: WritingPreferences): { system: string; user: string } {
   return {
     system: [
       "你是视频学习笔记的证据规划器。只根据字幕规划文章结构与定点截图，不写文章。",
@@ -14,6 +34,7 @@ export function planningPrompt(transcript: string, contract: string): { system: 
       "frames 每项包含 section_id、timestamp、purpose、required，通常 6-14 张，最多 24 张。",
       "优先选择实物、步骤、界面、图表、参数、对比和结果；纯口播章节不要硬凑截图。",
       "purpose 必须用中文具体说明画面如何帮助理解对应章节。",
+      ...preferenceLines(preferences),
       "\n笔记契约：\n",
       contract,
       "\nSRT 字幕：\n",
@@ -27,10 +48,11 @@ export function writingPrompt(
   contract: string,
   manifest: FrameManifest,
   vaultFrames: Array<Record<string, unknown>>,
+  preferences: WritingPreferences,
 ): { system: string; user: string } {
   return {
     system: [
-      "你是严谨的中文学习笔记作者。只返回严格 JSON：{\"filename\":\"中文标题 - English Title.md\",\"body\":\"...\"}。",
+      "你是严谨的中文学习笔记作者。只返回严格 JSON：{\"filename\":\"中文标题 - English Title.md\",\"topic\":\"简短中文主题\",\"body\":\"...\"}。",
       "正文完全由字幕支撑，截图只作为对应段落的视觉证据；不确定内容标记“待确认”。",
       "正文以中文为主，禁止顶层 # 标题，必须从 ## 一句话摘要开始。",
     ].join("\n"),
@@ -40,6 +62,7 @@ export function writingPrompt(
       "在对应论述附近使用清单给出的 obsidian_embed，并在图片前后写中文解释；不得使用未列出的图片。",
       "不要输出 YAML，YAML 将由插件安全保留和更新。不要粘贴完整字幕。",
       "原始字幕章节的链接由程序填入，不要猜测文件路径。图片说明放在每张图片之后。",
+      ...preferenceLines(preferences),
       "\n笔记契约：\n",
       contract,
       "\n抽帧清单：\n",
@@ -57,12 +80,14 @@ export function repairPrompt(
   manifest: FrameManifest,
   vaultFrames: Array<Record<string, unknown>>,
   filename: string,
+  preferences: WritingPreferences,
 ): { system: string; user: string } {
   return {
-    system: "你只修正现有中文学习笔记的校验问题。返回严格 JSON {\"filename\":\"...\",\"body\":\"...\"}，不得输出 YAML。",
+    system: "你只修正现有中文学习笔记的校验问题。返回严格 JSON {\"filename\":\"...\",\"topic\":\"简短中文主题\",\"body\":\"...\"}，不得输出 YAML。",
     user: [
       `文件名保持为：${filename}`,
       "只进行一次有针对性的修正，不删除原有有效知识，不重新提取素材。",
+      ...preferenceLines(preferences),
       "\n校验错误：\n",
       JSON.stringify(errors, null, 2),
       "\n笔记契约：\n",

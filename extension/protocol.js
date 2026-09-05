@@ -28,7 +28,10 @@
     code: "",
     can_retry_asr: false,
     can_resume: false,
-    allow_asr: false
+    allow_asr: false,
+    caption_diagnostic: "",
+    writing_style: "standard",
+    topic: ""
   });
 
   function createInitialState(overrides = {}) {
@@ -92,8 +95,8 @@
     if (message.code !== undefined) patch.code = message.code || "";
     if (message.allow_asr !== undefined) patch.allow_asr = Boolean(message.allow_asr);
     if (message.can_resume !== undefined) patch.can_resume = Boolean(message.can_resume);
-    for (const key of ["video_title", "video_url", "output_dir", "draft_path"]) {
-      if (message[key]) patch[key] = message[key];
+    for (const key of ["video_title", "video_url", "output_dir", "draft_path", "caption_diagnostic", "writing_style", "topic"]) {
+      if (message[key] !== undefined) patch[key] = message[key] || "";
     }
     if (message.title && !patch.video_title) patch.video_title = message.title;
     if (message.url && !patch.video_url) patch.video_url = message.url;

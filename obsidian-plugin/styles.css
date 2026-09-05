@@ -9,3 +9,13 @@
 .youtube-note-reader-warning {
   color: var(--text-error);
 }
+.youtube-reader-center { padding: 12px; }
+.youtube-reader-center h3 { margin: 4px 0 8px; }
+.youtube-reader-summary { color: var(--text-muted); margin-bottom: 10px; }
+.youtube-reader-filters { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; }
+.youtube-reader-filters input { grid-column: 1 / -1; }
+.youtube-reader-list { margin-top: 10px; }
+.youtube-reader-row { border-top: 1px solid var(--background-modifier-border); padding: 9px 0; }
+.youtube-reader-title { appearance: none; border: 0; background: none; color: var(--text-normal); padding: 0; text-align: left; font-weight: 600; cursor: pointer; }
+.youtube-reader-title:disabled { cursor: default; }
+.youtube-reader-meta { color: var(--text-muted); font-size: var(--font-ui-smaller); margin: 4px 0; }
