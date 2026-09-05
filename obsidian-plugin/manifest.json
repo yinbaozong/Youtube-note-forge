@@ -1,7 +1,7 @@
 {
   "id": "youtube-note-reader",
   "name": "YouTube Note Reader",
-  "version": "4.0.4",
+  "version": "4.0.5",
   "minAppVersion": "1.11.4",
   "description": "Turn YouTube videos into validated Chinese learning notes with the existing youtube-transcript Skill.",
   "author": "YouTube Note Forge",

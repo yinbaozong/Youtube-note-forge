@@ -15,6 +15,14 @@ async function collectPageCaptions(expectedId) {
   };
   function finish(entries, language, source) {
     entries = entries.filter(e => Number.isFinite(e.start) && e.start >= 0 && e.text?.trim());
+    // YouTube may mount the same transcript in multiple panels, including hidden ones.
+    const seen = new Set();
+    entries = entries.sort((a, b) => a.start - b.start).filter(e => {
+      const key = JSON.stringify([e.start, e.end ?? null, e.text.trim()]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (currentId() !== expectedId || !entries.length) return null;
     const last = entries[entries.length - 1];
     // Never treat the currently visible player caption or a truncated panel as a transcript.

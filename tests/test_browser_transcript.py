@@ -33,3 +33,13 @@ class BrowserTranscriptTests(unittest.TestCase):
                 return RunResult(args, 1, "", "ERROR: HTTP 429", "")
         with self.assertRaisesRegex(PipelineError, "429"):
             reprobe_subtitle_choice(Runner(), "https://www.youtube.com/watch?v=P2zRQ3BUu30", "en")
+
+    def test_duplicate_panels_are_sorted_and_deduplicated_without_losing_words(self):
+        rows = [{"start": 0, "text": "Opening"}, {"start": 95, "text": "End"}]
+        payload = {"status": "ok", "video_id": "video", "metadata": {"id": "video", "duration": 100},
+                   "entries": rows + rows + [{"start": 95, "text": "Another sentence"}]}
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "captions.json"
+            source.write_text(json.dumps(payload))
+            _, entries, _, _ = load_browser_transcript(str(source), "https://www.youtube.com/watch?v=video")
+        self.assertEqual([(e.start, e.text) for e in entries], [(0, "Opening"), (95, "End"), (95, "Another sentence")])

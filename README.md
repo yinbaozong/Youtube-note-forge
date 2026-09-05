@@ -2,7 +2,11 @@
 
 把 YouTube、Bilibili 等长视频整理成适合 Obsidian 长期学习的中文笔记，并保留 SRT、封面和与正文对应的关键截图。
 
-当前版本：`4.0.4`
+当前版本：`4.0.5`
+
+### 4.0.5 重复字幕面板修复
+
+真实失败数据包含两份完全相同的 370 条字幕（共 740 条），时间在两份之间从 895 秒退回 0 秒，被旧校验误报为字幕不完整。浏览器与 Python 接收端现在均按时间排序、去除时间及文本完全一致的记录，保留同一时刻的不同句子。已用该视频保存的实际输入验证：370 条、0–895 秒、视频长 898 秒，通过完整性校验。此验证针对素材接收，不等同于后续抽帧和文章生成的端到端验收。
 
 ### 4.0.4 字幕与校验修复
 
@@ -54,8 +58,8 @@ Chrome 当前视频页
 
 | 方式 | 发布包 | 适合人群 | 依赖 |
 | --- | --- | --- | --- |
-| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.4.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
-| 仅 Skill | `youtube-transcript-skill-v4.0.4.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
+| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.5.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
+| 仅 Skill | `youtube-transcript-skill-v4.0.5.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
 
 朋友使用完整阅读器时不需要安装 OpenCode，但需要使用自己的模型 API Key。
 

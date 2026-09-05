@@ -33,3 +33,13 @@ test("rejects a stale player response from another video", async () => {
   const result = await vm.runInContext('collectPageCaptions("P2zRQ3BUu30")', page({ id: "previousVideo" }));
   assert.equal(result.status, "player_not_ready");
 });
+
+test("duplicate transcript panels produce one ordered transcript", async () => {
+  const context = page();
+  const row = (stamp, text) => ({ querySelector: selector => ({ textContent: selector === ".segment-timestamp" ? stamp : text }) });
+  context.document.querySelectorAll = () => [row("0:00", "Opening"), row("1:35", "End"), row("0:00", "Opening"), row("1:35", "End")];
+  const result = await vm.runInContext('collectPageCaptions("P2zRQ3BUu30")', context);
+  assert.equal(result.status, "ok");
+  assert.equal(result.entries.length, 2);
+  assert.equal(result.entries[1].start, 95);
+});

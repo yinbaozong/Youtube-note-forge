@@ -32,7 +32,7 @@ function createWorker(fetchImpl) {
       getAll: async () => [{ domain: ".youtube.com", name: "SID", path: "/", value: "test" }],
     },
     runtime: {
-      getManifest: () => ({ version: "4.0.4" }),
+      getManifest: () => ({ version: "4.0.5" }),
       id: "abcdefghijklmnopabcdefghijklmnop",
       onMessage: { addListener: (value) => { listener = value; } },
     },
@@ -74,7 +74,7 @@ test("start job marks active, health, and RPC requests with the extension identi
   const worker = createWorker(async (url, options = {}) => {
     requests.push({ url, options });
     if (url.endsWith("/active")) return jsonResponse({ type: "status", status: "idle" });
-    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.0.4", current_vault: "C:\\Vault" });
+    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.0.5", current_vault: "C:\\Vault" });
     return jsonResponse({
       type: "accepted",
       status: "running",
@@ -90,20 +90,20 @@ test("start job marks active, health, and RPC requests with the extension identi
   for (const request of requests) {
     assert.equal(
       new Headers(request.options.headers).get("X-YouTube-Reader-Client"),
-      "abcdefghijklmnopabcdefghijklmnop@4.0.4"
+      "abcdefghijklmnopabcdefghijklmnop@4.0.5"
     );
   }
 });
 
 test("settings never report connected when the authenticated RPC is rejected", async () => {
   const worker = createWorker(async (url) => {
-    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.0.4" });
+    if (url.endsWith("/health")) return jsonResponse({ status: "ok", version: "4.0.5" });
     return jsonResponse({
       type: "error",
       status: "error",
       code: "EXTENSION_CLIENT_REJECTED",
       message: "Chrome 扩展请求未通过本地连接校验。",
-      plugin_version: "4.0.4",
+      plugin_version: "4.0.5",
     }, 403);
   });
 

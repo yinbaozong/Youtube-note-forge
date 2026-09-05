@@ -1,5 +1,5 @@
 ---
-description: Execute the optional youtube-transcript v4.0.4 OpenCode compatibility workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
+description: Execute the optional youtube-transcript v4.0.5 OpenCode compatibility workflow. Never skip transcript-guided frame extraction; allow one note-only validation repair.
 mode: primary
 permission:
   read: allow

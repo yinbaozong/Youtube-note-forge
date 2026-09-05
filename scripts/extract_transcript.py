@@ -513,6 +513,8 @@ def load_browser_transcript(filename: str, url: str) -> tuple[dict, list[Transcr
             raise PipelineError("BROWSER_TRANSCRIPT_INVALID", "transcript", "浏览器字幕时间戳无效。")
         if text:
             entries.append(TranscriptEntry(start, end, text))
+    # Older extensions can send duplicated DOM panels; normalize at the ingestion boundary too.
+    entries = sorted({(e.start, e.end, e.text): e for e in entries}.values(), key=lambda e: e.start)
     if (not math.isfinite(duration) or duration <= 0 or not entries or
         entries[0].start > 90 or (entries[-1].end or entries[-1].start) < duration * .7 or
         any(a.start > b.start for a, b in zip(entries, entries[1:]))):
