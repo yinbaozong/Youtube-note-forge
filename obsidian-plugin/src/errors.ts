@@ -11,7 +11,11 @@ export function mapPipelineFailure(result: PipelineResult): PublicFailure {
   return {
     status: "error",
     code,
-    message: String(result.message || code),
+    message: [
+      String(result.message || (code === "NOTE_VALIDATION_FAILED" ? "笔记校验未通过，已保留草稿。" : code)),
+      ...(result.errors || []).slice(0, 8).map((item) => `${item.code}: ${item.message || ""}`),
+      result.action,
+    ].filter(Boolean).join("\n"),
     can_retry_asr: ASR_RETRY_CODES.has(code),
     auto_retry: false,
     stage: result.stage ? String(result.stage) : undefined,

@@ -92,7 +92,7 @@
     if (message.code !== undefined) patch.code = message.code || "";
     if (message.allow_asr !== undefined) patch.allow_asr = Boolean(message.allow_asr);
     if (message.can_resume !== undefined) patch.can_resume = Boolean(message.can_resume);
-    for (const key of ["video_title", "video_url", "output_dir"]) {
+    for (const key of ["video_title", "video_url", "output_dir", "draft_path"]) {
       if (message[key]) patch[key] = message[key];
     }
     if (message.title && !patch.video_title) patch.video_title = message.title;

@@ -299,7 +299,8 @@ def validate(note: Path, vault: Path) -> list[dict[str, str]]:
     if repeated:
         errors.append({"code": "REPEATED_CONTENT", "message": "正文包含重复的长段落，必须合并或删除。"})
     chinese = len(re.findall(r"[\u3400-\u9fff]", body))
-    latin = len(re.findall(r"[A-Za-z]", re.sub(r"`[^`]*`|https?://\S+", "", body)))
+    prose = re.sub(r"!?\[\[[^\]]+\]\]|!\[[^\]]*\]\([^\n]+\)|`[^`]*`|https?://\S+", "", body)
+    latin = len(re.findall(r"[A-Za-z]", prose))
     if chinese < 120 or chinese / max(1, chinese + latin) < 0.45:
         errors.append({"code": "CHINESE_CONTENT_INSUFFICIENT", "message": "正文中文内容不足或夹杂过多英文。"})
     return errors

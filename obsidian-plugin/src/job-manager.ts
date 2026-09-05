@@ -17,7 +17,7 @@ import {
 import { saveYouTubeCookies, type BrowserCookie } from "./cookies";
 import { mapPipelineFailure } from "./errors";
 import { requestChatJson } from "./model-client";
-import { resolveInsideVault, sanitizeNoteFilename, splitFrontmatter, updateFrontmatter } from "./note-utils";
+import { bindTranscript, frontmatterValue, resolveInsideVault, sanitizeNoteFilename, splitFrontmatter, updateFrontmatter } from "./note-utils";
 import { PythonScriptRunner, timeoutErrorForScript, type ScriptRunResult } from "./process-runner";
 import { planningPrompt, repairPrompt, writingPrompt } from "./prompts";
 import { getApiKey, type YouTubeReaderSettings } from "./settings";
@@ -42,6 +42,7 @@ export interface StartJobRequest {
   cookies?: BrowserCookie[];
   resume?: boolean;
   allow_asr?: boolean;
+  browser_transcript?: { status?: string; [key: string]: unknown };
 }
 
 export interface JobState {
@@ -156,7 +157,7 @@ export class JobManager {
           ...settings,
           current_model: settings.model,
           current_vault: this.options.vaultBasePath,
-          plugin_version: "4.0.3",
+          plugin_version: "4.0.4",
           api_key_configured: hasApiKey(this.options.app),
         },
       };
@@ -238,6 +239,8 @@ export class JobManager {
     const heartbeat = setInterval(() => void this.heartbeat(), 5_000);
     let finalTarget = "";
     let priorFinal: string | null = null;
+    let stagingNote = "";
+    let published = false;
     try {
       const settings = this.options.getSettings();
       const apiKey = getApiKey(this.options.app);
@@ -260,6 +263,13 @@ export class JobManager {
           "--deadline", String(Math.min(300, this.remainingSeconds())),
         ];
         if (request.allow_asr) args.push("--allow-asr");
+        if (request.browser_transcript?.status === "ok") {
+          const inputDir = resolveInsideVault(this.options.vaultBasePath, `${settings.outputFolder}/assets/${videoId(request.url)}`);
+          await fs.mkdir(inputDir, { recursive: true });
+          const inputPath = path.join(inputDir, "browser-transcript.json");
+          await fs.writeFile(inputPath, JSON.stringify(request.browser_transcript), "utf8");
+          args.push("--browser-transcript", inputPath);
+        }
         const result = await this.runScript(settings, "extract_transcript.py", args, signal, 300_000);
         const pipeline = requireSuccess(result);
         material = {
@@ -320,30 +330,44 @@ export class JobManager {
         obsidian_embed: `![[${vaultRelative(this.options.vaultBasePath, frame.path)}]]`,
       }));
       const draftSource = await fs.readFile(material.note, "utf8");
+      const srtPath = vaultRelative(this.options.vaultBasePath, material.transcript);
+      const stagingDir = resolveInsideVault(this.options.vaultBasePath, `${settings.outputFolder}/.reader-drafts/${videoId(request.url)}`);
+      await fs.mkdir(stagingDir, { recursive: true });
+      const checkpointPath = path.join(stagingDir, "writing.json");
+      let cachedWriting;
+      if (request.resume) {
+        try {
+          const cached = JSON.parse(await fs.readFile(checkpointPath, "utf8"));
+          if (cached.manifest === manifestPath && cached.version === skillVersion && cached.model === settings.model) cachedWriting = cached.writing;
+        } catch { /* No completed writing checkpoint yet. */ }
+      }
       const prompt = writingPrompt(transcript, contract, manifest, vaultFrames);
-      const writing = validateWritingResult(await requestChatJson({
+      const writing = validateWritingResult(cachedWriting || await requestChatJson({
         ...prompt,
         apiBase: settings.apiBase,
         apiKey,
         model: settings.model,
         signal,
       }));
+      await fs.writeFile(checkpointPath, JSON.stringify({ manifest: manifestPath, version: skillVersion, model: settings.model, writing }), "utf8");
       const safeFilename = sanitizeNoteFilename(writing.filename);
       finalTarget = resolveInsideVault(this.options.vaultBasePath, `${settings.outputFolder}/${safeFilename}`);
       priorFinal = await readIfExists(finalTarget);
-      const finalSource = composeNote(draftSource, writing.body, {
+      stagingNote = path.join(stagingDir, safeFilename);
+      const finalSource = composeNote(draftSource, bindTranscript(writing.body, srtPath), {
         title: safeFilename.replace(/\.md$/i, ""),
         skill_version: skillVersion,
         quality_profile_version: "1",
       });
-      await fs.writeFile(finalTarget, finalSource, "utf8");
+      await fs.writeFile(stagingNote, finalSource, "utf8");
+      await this.setState({ draft_path: stagingNote, screenshot_dir: path.dirname(manifestPath!), screenshot_count: manifest.frames.length });
 
       await this.progress("validation", "正在校验结构、深度、中文比例、截图和 SRT 链接。", 92);
-      let validation = await this.validate(settings, finalTarget, signal);
+      let validation = await this.validate(settings, stagingNote, signal);
       if (isRepairableValidation(validation)) {
         await this.progress("validation", "首次校验未通过，正在进行唯一一次正文修正。", 94);
         const repair = repairPrompt(
-          bodyOnly(await fs.readFile(finalTarget, "utf8")),
+          bodyOnly(await fs.readFile(stagingNote, "utf8")),
           validation.results.at(-1)?.errors,
           contract,
           manifest,
@@ -357,13 +381,22 @@ export class JobManager {
           model: settings.model,
           signal,
         }));
-        const current = await fs.readFile(finalTarget, "utf8");
-        await fs.writeFile(finalTarget, composeNote(current, repaired.body, {}), "utf8");
-        validation = await this.validate(settings, finalTarget, signal);
+        const current = await fs.readFile(stagingNote, "utf8");
+        await fs.writeFile(stagingNote, composeNote(current, bindTranscript(repaired.body, srtPath), {}), "utf8");
+        await fs.writeFile(checkpointPath, JSON.stringify({ manifest: manifestPath, version: skillVersion, model: settings.model, writing: repaired }), "utf8");
+        validation = await this.validate(settings, stagingNote, signal);
       }
       requireSuccess(validation);
-
-      if (settings.autoOpenNote) await this.options.openNote(finalTarget);
+      await fs.copyFile(stagingNote, finalTarget);
+      published = true;
+      let noteOpened = false;
+      if (settings.autoOpenNote) {
+        try { await this.options.openNote(finalTarget); noteOpened = true; } catch { /* The validated file is still complete. */ }
+      }
+      if (path.basename(material.note).startsWith("待命名 -") && material.note !== finalTarget
+          && frontmatterValue(draftSource, "url") === request.url) {
+        await fs.unlink(material.note).catch(() => {});
+      }
       await this.setState({
         type: "complete",
         status: "ok",
@@ -373,11 +406,11 @@ export class JobManager {
         note_path: finalTarget,
         screenshot_dir: path.dirname(manifestPath!),
         screenshot_count: manifest.frames.length,
-        note_opened: settings.autoOpenNote,
+        note_opened: noteOpened,
         can_resume: false,
       });
     } catch (error) {
-      if (finalTarget) await restoreFile(finalTarget, priorFinal);
+      if (published && finalTarget) await restoreFile(finalTarget, priorFinal);
       if (this.state.status === "cancelled") return;
       if (this.state.code === "TASK_INTERRUPTED") return;
       if (error instanceof PipelineFailure) {
@@ -391,6 +424,8 @@ export class JobManager {
           can_retry_asr: failure.can_retry_asr,
           can_resume: true,
           result_stage: failure.stage,
+          validation_errors: error.result.errors,
+          draft_path: stagingNote || undefined,
         });
       } else {
         const failedStage = this.state.stage;

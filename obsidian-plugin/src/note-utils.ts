@@ -71,3 +71,9 @@ export function updateFrontmatter(source: string, updates: Record<string, string
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+export function bindTranscript(body: string, transcriptPath: string): string {
+  const section = `## 原始字幕 Transcript\n\n- SRT：[[${transcriptPath}]]\n`;
+  const pattern = /^## 原始字幕 Transcript\s*\n[\s\S]*?(?=^## |$(?![\s\S]))/m;
+  return pattern.test(body) ? body.replace(pattern, () => section) : `${body.trim()}\n\n${section}`;
+}

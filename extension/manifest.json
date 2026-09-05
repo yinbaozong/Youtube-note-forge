@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "YouTube 阅读器",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "description": "把当前 YouTube 视频交给 Obsidian 的 YouTube Note Reader 插件生成学习笔记。",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlqhZ9hvhPj9jo1b+K5caCPFvqUQMOVbBOF43csw0SAKc0o9TNr3FtbmhUGixme7DjHG6nO6PEAJb8K5typIThpnugWA8ZfJ8Bzt51rk/dXGJxA8OH/Jw3RZZcrmCHO+CR9IOVJ+t0f131cYHX4x5KE6MIf2wiyiLXNt3eubV2IIbF4J/uwM5miZts390j8PRu0Mjd5RXGA2F0VNAjB4uh53aXxrvO2RbbLlleSY8GFoBhPQAZRGAeIsw0JYgQ5/AJ4FxTdX0yclXwD/TLugnLwWVAoFkJTU8yzZiy9yVS0WHHb3tIM4MBSdSYHNhpnfNNmiwVezLxD+3jKs9f2rH0wIDAQAB",
-  "permissions": ["cookies", "storage", "tabs"],
+  "permissions": ["cookies", "storage", "tabs", "scripting"],
   "host_permissions": ["https://*.youtube.com/*", "https://youtu.be/*", "http://127.0.0.1:32191/*"],
   "background": {"service_worker": "service_worker.js"},
   "icons": {

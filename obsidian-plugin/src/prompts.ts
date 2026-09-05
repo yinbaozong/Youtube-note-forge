@@ -10,6 +10,7 @@ export function planningPrompt(transcript: string, contract: string): { system: 
     user: [
       "请返回：{\"article_outline\":[...],\"frames\":[...]}。",
       "article_outline 必须有 3-8 项，每项包含 section_id、title、start、end、core_claims、learning_goal。",
+      "按字幕结束时间确定最少章节数：10分钟内3章，10-30分钟4章，30-60分钟5章，60分钟以上6章。",
       "frames 每项包含 section_id、timestamp、purpose、required，通常 6-14 张，最多 24 张。",
       "优先选择实物、步骤、界面、图表、参数、对比和结果；纯口播章节不要硬凑截图。",
       "purpose 必须用中文具体说明画面如何帮助理解对应章节。",
@@ -38,6 +39,7 @@ export function writingPrompt(
       "详细内容总结必须逐一使用 article_outline 的 title 作为完全一致的 ### 标题。",
       "在对应论述附近使用清单给出的 obsidian_embed，并在图片前后写中文解释；不得使用未列出的图片。",
       "不要输出 YAML，YAML 将由插件安全保留和更新。不要粘贴完整字幕。",
+      "原始字幕章节的链接由程序填入，不要猜测文件路径。图片说明放在每张图片之后。",
       "\n笔记契约：\n",
       contract,
       "\n抽帧清单：\n",

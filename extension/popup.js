@@ -96,6 +96,7 @@ function render(state) {
   if (state.video_title) taskLines.push("正在处理：" + state.video_title);
   if (state.video_url) taskLines.push("视频位置：" + state.video_url);
   if (state.output_dir) taskLines.push("预计保存位置：" + state.output_dir);
+  if (state.draft_path && state.status === "error") taskLines.push("已保留正文草稿：" + state.draft_path);
   if (state.allow_asr && running) taskLines.push("字幕方式：ASR 语音识别（需要下载音频）");
   taskInfo.hidden = taskLines.length === 0;
   taskInfo.textContent = taskLines.join("\n");

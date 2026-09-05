@@ -88,3 +88,5 @@ button.secondary { color: #202936; background: #fff; }
 button.danger { border-color: #b52b36; background: #b52b36; }
 button.asr { border-color: #a66c00; background: #a66c00; }
 button:disabled { opacity: .55; }
+/* Keep multi-line validation diagnostics readable. */
+#status { white-space: pre-wrap; overflow-wrap: anywhere; }

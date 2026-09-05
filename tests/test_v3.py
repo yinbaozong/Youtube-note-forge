@@ -65,12 +65,12 @@ class V3ContractTests(unittest.TestCase):
         self.assertEqual(runner.timeout, 45)
 
     def test_version_is_single_source(self) -> None:
-        self.assertEqual(VERSION, "4.0.3")
-        self.assertEqual(version_text(), "youtube-transcript 4.0.3")
+        self.assertEqual(VERSION, "4.0.4")
+        self.assertEqual(version_text(), "youtube-transcript 4.0.4")
 
     def test_version_report_contains_core_hashes(self) -> None:
         report = version_report()
-        self.assertEqual(report["skill_version"], "4.0.3")
+        self.assertEqual(report["skill_version"], "4.0.4")
         self.assertIn("scripts/extract_frames.py", report["core_sha256"])
 
     def test_frame_plan_accepts_utf8_bom(self) -> None:
@@ -478,9 +478,8 @@ class SubtitleDiagnosisTests(unittest.TestCase):
             def run(self, args, *, purpose, check, timeout=None):
                 return RunResult(args=args, returncode=0, stdout="not json", stderr="", credential_label="")
 
-        self.assertIsNone(
-            reprobe_subtitle_choice(BrokenRunner(), "https://www.youtube.com/watch?v=J1WoNuemKOg", "zh-Hans")  # type: ignore[arg-type]
-        )
+        with self.assertRaisesRegex(Exception, "不能判定视频无字幕"):
+            reprobe_subtitle_choice(BrokenRunner(), "https://www.youtube.com/watch?v=J1WoNuemKOg", "zh-Hans")
 
     def test_impersonation_dependency_is_declared(self) -> None:
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")

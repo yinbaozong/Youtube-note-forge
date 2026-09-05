@@ -7,7 +7,7 @@ const HOST = "127.0.0.1";
 const PORT = 32191;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const CLIENT_HEADER = "x-youtube-reader-client";
-const PLUGIN_VERSION = "4.0.3";
+const PLUGIN_VERSION = "4.0.4";
 
 export interface PluginHttpServerOptions {
   host?: string;

@@ -2,7 +2,15 @@
 
 把 YouTube、Bilibili 等长视频整理成适合 Obsidian 长期学习的中文笔记，并保留 SRT、封面和与正文对应的关键截图。
 
-当前版本：`4.0.3`
+当前版本：`4.0.4`
+
+### 4.0.4 字幕与校验修复
+
+Chrome 点击生成时先在当前视频页读取完整字幕，最多等待约 15 秒；优先使用原生文字稿或播放器字幕接口，必要时打开 YouTube 原生文字稿面板。不读取屏幕上的单句字幕或第三方翻译面板。文本与视频 ID、时长校验通过后交给现有 Skill 生成 SRT；读取失败仍使用既有 yt-dlp 路径，并区分“探测失败”和“接口未返回字幕”。需要重新加载 Chrome 扩展以应用新增的 scripting 权限。
+
+SRT 链接由程序绑定真实文件，中文比例不再统计图片和字幕路径中的英文。正文先写入 `YouTube video/.reader-drafts/<视频ID>/`，通过校验后才发布正式笔记；失败显示具体校验项与草稿位置，点击继续可复用写作检查点。质量校验与最多一次正文修正继续保留。
+
+验证范围：自动化回归与本地安装校验；未完成当前登录态下的真实视频端到端验收，页面结构变化或字幕接口限流仍可能导致读取失败。
 
 ## v4 架构
 
@@ -46,8 +54,8 @@ Chrome 当前视频页
 
 | 方式 | 发布包 | 适合人群 | 依赖 |
 | --- | --- | --- | --- |
-| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.3.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
-| 仅 Skill | `youtube-transcript-skill-v4.0.3.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
+| 完整阅读器 | `youtube-reader-chrome-obsidian-v4.0.4.zip` | 追求稳定的一键操作 | Chrome、Obsidian、Python、FFmpeg、Node.js、模型 API Key |
+| 仅 Skill | `youtube-transcript-skill-v4.0.4.zip` | 已经使用 OpenCode，愿意自行调用命令 | OpenCode、Python、FFmpeg、Node.js |
 
 朋友使用完整阅读器时不需要安装 OpenCode，但需要使用自己的模型 API Key。
 

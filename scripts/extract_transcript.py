@@ -19,6 +19,7 @@ import argparse
 import html
 import hashlib
 import json
+import math
 import re
 import secrets
 import shutil
@@ -494,6 +495,33 @@ def extract_metadata(runner: YtDlp, url: str) -> dict:
     return extract_json(result.stdout)
 
 
+def load_browser_transcript(filename: str, url: str) -> tuple[dict, list[TranscriptEntry], str, str]:
+    """Accept complete, video-bound text from our Chrome extension, never credentials."""
+    payload = json.loads(Path(filename).read_text(encoding="utf-8-sig"))
+    parsed = urllib.parse.urlparse(url)
+    expected = urllib.parse.parse_qs(parsed.query).get("v", [""])[0] or parsed.path.strip("/").split("/")[-1]
+    metadata = payload.get("metadata") or {}
+    if payload.get("status") != "ok" or payload.get("video_id") != expected or metadata.get("id") != expected:
+        raise PipelineError("BROWSER_TRANSCRIPT_INVALID", "transcript", "浏览器字幕与当前视频不匹配，请刷新视频页。")
+    duration = float(metadata.get("duration") or 0)
+    entries = []
+    for raw in payload.get("entries", []):
+        start = float(raw.get("start", -1))
+        end = float(raw["end"]) if raw.get("end") is not None else None
+        text = str(raw.get("text") or "").strip()
+        if not math.isfinite(start) or start < 0 or (end is not None and (not math.isfinite(end) or end < start)):
+            raise PipelineError("BROWSER_TRANSCRIPT_INVALID", "transcript", "浏览器字幕时间戳无效。")
+        if text:
+            entries.append(TranscriptEntry(start, end, text))
+    if (not math.isfinite(duration) or duration <= 0 or not entries or
+        entries[0].start > 90 or (entries[-1].end or entries[-1].start) < duration * .7 or
+        any(a.start > b.start for a, b in zip(entries, entries[1:]))):
+        raise PipelineError("BROWSER_TRANSCRIPT_INCOMPLETE", "transcript", "浏览器字幕不完整，请打开 YouTube 的显示文字稿后重试。")
+    safe_metadata = {key: metadata.get(key) for key in ("id", "title", "duration", "channel")}
+    safe_metadata.update(webpage_url=url, thumbnail=f"https://i.ytimg.com/vi/{expected}/hqdefault.jpg")
+    return safe_metadata, entries, "subtitle:browser", str(payload.get("language") or "und")
+
+
 def lang_patterns(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
@@ -585,11 +613,11 @@ def reprobe_subtitle_choice(runner: YtDlp, url: str, preferred_langs: str) -> Su
         timeout=45,
     )
     if result.returncode != 0:
-        return None
+        raise PipelineError("SUBTITLE_PROBE_FAILED", "transcript", "字幕探测请求失败：" + summarize_ytdlp_failure(result.stderr))
     try:
         metadata = extract_json(result.stdout)
-    except (json.JSONDecodeError, RuntimeError):
-        return None
+    except (json.JSONDecodeError, RuntimeError) as exc:
+        raise PipelineError("SUBTITLE_PROBE_FAILED", "transcript", "字幕探测接口没有返回有效结果，不能判定视频无字幕。") from exc
     return choose_subtitle(metadata, preferred_langs)
 
 
@@ -621,7 +649,7 @@ def transcript_unavailable_error(choice: SubtitleChoice | None, subtitle_error: 
     return PipelineError(
         "SUBTITLE_UNAVAILABLE",
         "transcript",
-        "该视频没有可用字幕，且未明确允许 ASR。",
+        "当前提取接口未返回可用字幕；这不代表视频没有字幕。",
         action="如接受下载音频和更长耗时，请在本次任务中明确允许 ASR。",
     )
 
@@ -1657,6 +1685,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-cookies", action="store_true", help="Do not use saved cookies")
     parser.add_argument("--proxy", help="Proxy URL passed to yt-dlp")
     parser.add_argument("--langs", default=DEFAULT_LANGS, help="Comma-separated subtitle language priority")
+    parser.add_argument("--browser-transcript", help="Validated current-page captions exported by the Chrome extension")
     parser.add_argument("--allow-asr", action="store_true", help="Explicitly allow slower audio download and local ASR")
     parser.add_argument("--force-asr", action="store_true", help="Skip platform subtitles and run ASR; requires --allow-asr")
     parser.add_argument("--asr-model", default="base", help="faster-whisper model name")
@@ -1739,7 +1768,8 @@ def main(argv: list[str] | None = None) -> int:
 
     emit_progress("materials", "正在读取视频元数据。", percent=8)
     print(f"Extracting metadata: {args.url}")
-    metadata = extract_metadata(runner, args.url)
+    browser_material = load_browser_transcript(args.browser_transcript, args.url) if args.browser_transcript and not args.force_asr else None
+    metadata = browser_material[0] if browser_material else extract_metadata(runner, args.url)
     emit_progress("materials", "元数据已读取，正在获取字幕。", percent=13)
     title = metadata.get("title") or metadata.get("id") or "video"
     output_file = output_dir / (args.output_filename or (suggested_note_filename(title) + ".md"))
@@ -1750,11 +1780,14 @@ def main(argv: list[str] | None = None) -> int:
         transcript_entries: list[TranscriptEntry] = []
         transcript_source = ""
         transcript_language = ""
+        if browser_material:
+            _, transcript_entries, transcript_source, transcript_language = browser_material
+            emit_progress("materials", f"已读取浏览器完整字幕，共 {len(transcript_entries)} 段。", percent=20)
         warnings: list[str] = []
         subtitle_error = ""
 
-        choice = None if args.force_asr else choose_subtitle(metadata, args.langs)
-        if choice is None and not args.force_asr:
+        choice = None if args.force_asr or browser_material else choose_subtitle(metadata, args.langs)
+        if choice is None and not args.force_asr and not browser_material:
             choice = reprobe_subtitle_choice(runner, args.url, args.langs)
             if choice:
                 print(f"Recovered subtitle track after re-probe: {choice.lang} ({choice.source})")

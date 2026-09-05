@@ -1,4 +1,5 @@
 importScripts("protocol.js");
+importScripts("captions.js");
 
 const PLUGIN_BASE = "http://127.0.0.1:32191";
 const {
@@ -270,14 +271,27 @@ async function startJob(options = {}) {
   });
 
   try {
-    const response = await pluginRequest(buildStartPayload({
+    let browserTranscript;
+    if (tab?.id && url === tab.url) {
+      await updateState({ message: "正在读取当前 YouTube 页面的完整字幕（最多 15 秒）。" });
+      try {
+        const id = new URL(url).searchParams.get("v") || new URL(url).pathname.split("/")[2];
+        const captured = await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, world: "MAIN", func: collectPageCaptions, args: [id],
+        });
+        browserTranscript = captured[0]?.result;
+      } catch { browserTranscript = { status: "capture_failed" }; }
+    }
+    const payload = buildStartPayload({
       requestId,
       url,
       title,
       cookies,
       resume,
       allowAsr
-    }));
+    });
+    if (browserTranscript) payload.browser_transcript = browserTranscript;
+    const response = await pluginRequest(payload);
     await updateState(applyStatus(response));
     if (response.type === "attached" && response.active_request_id) {
       await updateState({ request_id: response.active_request_id });
